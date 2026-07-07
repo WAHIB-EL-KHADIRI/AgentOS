@@ -86,6 +86,16 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
 
     let agent_handle = system.spawn_agent(spec).await?;
 
+    // Heartbeat supervision: restarts agents whose heartbeat goes stale.
+    // The monitor loop existed but was never started by any runtime path
+    // before this wiring.
+    let monitor_handle = {
+        let supervisor = system.supervisor.clone();
+        tokio::spawn(async move {
+            supervisor.monitor().await;
+        })
+    };
+
     // Dashboards that connect after spawn missed the agent_started event;
     // a periodic agent_status frame lets them converge on current state.
     let status_handle = {
@@ -316,6 +326,7 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
     grpc_handle.abort();
     sse_handle.abort();
     status_handle.abort();
+    monitor_handle.abort();
 
     println!("agent '{agent_id}' stopped");
     println!("  final status: {:?}", agent_handle.state().await);

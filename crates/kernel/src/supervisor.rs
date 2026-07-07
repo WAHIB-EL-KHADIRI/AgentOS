@@ -615,4 +615,54 @@ mod tests {
         let state = wait_until_state(&handle, |state| matches!(state, AgentState::Stopped)).await;
         assert_eq!(state, AgentState::Stopped);
     }
+
+    /// Documents a real recovery boundary: soft restart works only while the
+    /// agent loop task is alive. Once the loop has exited (after stop), the
+    /// command channel is closed and restart must fail cleanly with an error
+    /// instead of pretending to recover.
+    #[tokio::test]
+    async fn test_restart_after_agent_loop_exit_fails_cleanly() {
+        let sup = Supervisor::new();
+        let handle = sup
+            .spawn(AgentSpec::new("dead-loop", "Dead Loop Test"))
+            .await
+            .unwrap();
+
+        sup.stop("dead-loop").await.unwrap();
+        let state = wait_until_state(&handle, |state| state.is_terminal()).await;
+        assert!(state.is_terminal());
+
+        // The loop has exited; a restart cannot resurrect it.
+        let result = sup.restart("dead-loop").await;
+        assert!(
+            result.is_err(),
+            "restart of an exited agent loop must fail, got {result:?}"
+        );
+        assert!(!handle.is_running().await);
+    }
+
+    /// The monitor restarts agents whose heartbeat is stale. This exercises
+    /// one full monitor pass against a live agent whose heartbeat is
+    /// artificially aged, without waiting for real timeouts.
+    #[tokio::test]
+    async fn test_stale_agent_detected_and_soft_restarted() {
+        let sup = Supervisor::new();
+        let mut spec = AgentSpec::new("stale-agent", "Stale Agent Test");
+        spec.heartbeat_timeout_secs = 1;
+        let handle = sup.spawn(spec).await.unwrap();
+
+        // Simulate a stale heartbeat far in the future relative to the last
+        // beat, then apply exactly what one monitor tick does.
+        let stale_at = handle.last_heartbeat() + 60;
+        let stale = sup.stale_handles_at(stale_at).await;
+        assert_eq!(stale.len(), 1);
+
+        for stale_handle in stale {
+            stale_handle.restart().await.unwrap();
+        }
+
+        wait_until_restart_count(&handle, 1).await;
+        assert!(handle.is_running().await);
+        assert_eq!(handle.restart_count(), 1);
+    }
 }
