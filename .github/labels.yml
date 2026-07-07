@@ -1,0 +1,37 @@
+- name: good first issue
+  color: "7057ff"
+  description: Good entry point for new contributors
+- name: help wanted
+  color: "008672"
+  description: Maintainers want contributor help
+- name: architecture
+  color: "1d76db"
+  description: Runtime or system design discussion
+- name: kernel
+  color: "f97316"
+  description: Agent lifecycle and supervision
+- name: bus
+  color: "0ea5e9"
+  description: Messaging, Protobuf, or gRPC
+- name: trace
+  color: "8b5cf6"
+  description: Time-travel recording, replay, fork, or diff
+- name: vault
+  color: "dc2626"
+  description: Secrets, permissions, or auditability
+- name: dashboard
+  color: "14b8a6"
+  description: React UI and developer experience
+- name: sdk
+  color: "22c55e"
+  description: Python, TypeScript, or external clients
+- name: docs
+  color: "64748b"
+  description: Documentation improvements
+- name: security
+  color: "b91c1c"
+  description: Security-sensitive design or implementation
+- name: question
+  color: "d946ef"
+  description: Needs discussion before implementation
+

@@ -1,0 +1,106 @@
+# Experimental packaging stack. The current CLI does not expose a standalone
+# standalone bus command, so this stack uses the supervisor image
+# until a dedicated bus/server entrypoint is added.
+x-agentos-service-defaults: &agentos-service-defaults
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  agentos-bus:
+    <<: *agentos-service-defaults
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: supervisor
+    ports:
+      - "9876:9876"
+    environment:
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "agentOS", "supervisor", "--health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  agentos-runtime:
+    <<: *agentos-service-defaults
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    depends_on:
+      agentos-bus:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=info
+      - BUS_ADDR=http://agentos-bus:9876
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "agentOS", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  dashboard:
+    <<: *agentos-service-defaults
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      agentos-bus:
+        condition: service_healthy
+    environment:
+      - VITE_API_URL=http://localhost:9876
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5173/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--protected-mode", "yes"]
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /data
+    profiles:
+      - cache
+      - full
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agentos
+      POSTGRES_PASSWORD: ${AGENTOS_POSTGRES_PASSWORD:?Set AGENTOS_POSTGRES_PASSWORD before enabling the persistence profile}
+      POSTGRES_DB: agentos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    profiles:
+      - persistence
+      - full
+
+volumes:
+  pgdata:

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Discussion
+    url: https://github.com/WAHIB-EL-KHADIRI/agentOS/discussions
+    about: Please ask questions and discuss features here.
+  - name: 📖 FAQ
+    url: https://github.com/WAHIB-EL-KHADIRI/agentOS/blob/main/docs/faq.md
+    about: Check the FAQ before opening an issue.
+  - name: 🛡️ Security
+    url: https://github.com/WAHIB-EL-KHADIRI/agentOS/blob/main/SECURITY.md
+    about: Report security vulnerabilities privately.

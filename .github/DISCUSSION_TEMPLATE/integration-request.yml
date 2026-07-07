@@ -1,0 +1,18 @@
+title: "Integration request: "
+labels: ["integration"]
+body:
+  - type: input
+    id: framework
+    attributes:
+      label: Framework or tool
+      description: Example: LangGraph, AutoGen, CrewAI, Semantic Kernel.
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: What should AgentOS support?
+    validations:
+      required: true
+

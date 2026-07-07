@@ -1,0 +1,28 @@
+[package]
+name = "agentos-bus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+tokio-stream = { version = "0.1", features = ["sync"] }
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["server", "client", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["client", "tokio"] }
+prost.workspace = true
+bytes = "1"
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+
+[lints]
+workspace = true

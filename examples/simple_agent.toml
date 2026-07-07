@@ -1,0 +1,8 @@
+name = "simple-agent"
+prompt = "You are a careful agent that explains every important decision."
+capabilities = [
+    "file_system_read",
+    "memory_write",
+    "trace_record",
+]
+

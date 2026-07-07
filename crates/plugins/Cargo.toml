@@ -1,0 +1,21 @@
+[package]
+name = "agentos-plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WASM plugin system for sandboxed agent extensions"
+
+[dependencies]
+wasmtime = "28"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,24 @@
+[package]
+name = "agentos-benches"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+agentos-bus = { path = "../crates/bus" }
+agentos-memory = { path = "../crates/memory" }
+agentos-vault = { path = "../crates/vault" }
+criterion.workspace = true
+tokio.workspace = true
+
+[[bench]]
+name = "bus_benchmarks"
+harness = false
+
+[[bench]]
+name = "memory_benchmarks"
+harness = false
+
+[[bench]]
+name = "vault_benchmarks"
+harness = false

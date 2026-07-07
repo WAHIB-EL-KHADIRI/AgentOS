@@ -1,0 +1,22 @@
+[package]
+name = "agentos-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+rusqlite.workspace = true
+uuid.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+parking_lot.workspace = true
+
+[lints]
+workspace = true

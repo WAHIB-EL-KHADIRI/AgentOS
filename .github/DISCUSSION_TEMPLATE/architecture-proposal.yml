@@ -1,0 +1,23 @@
+title: "Architecture proposal: "
+labels: ["architecture"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What architecture problem are you solving?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the design and tradeoffs.
+    validations:
+      required: true
+  - type: textarea
+    id: affected
+    attributes:
+      label: Affected crates
+      description: Which crates or docs would change?
+

@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package agentos.bus.v1;
+
+message AgentEnvelope {
+  string id = 1;
+  string source_agent_id = 2;
+  string target_agent_id = 3;
+  string topic = 4;
+  bytes payload = 5;
+  uint64 timestamp_ms = 6;
+}
+
+message PublishRequest {
+  AgentEnvelope envelope = 1;
+}
+
+message PublishResponse {
+  string message_id = 1;
+}
+
+message SubscribeRequest {
+  string agent_id = 1;
+  repeated string topics = 2;
+}
+
+service AgentBus {
+  rpc Publish(PublishRequest) returns (PublishResponse);
+  rpc Subscribe(SubscribeRequest) returns (stream AgentEnvelope);
+}
+

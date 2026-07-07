@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentos-sdk"
+version = "0.1.0"
+description = "Python SDK for AgentOS - AI Agent Operating Layer"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT OR Apache-2.0"
+authors = [
+    { name = "AgentOS contributors" },
+]
+dependencies = [
+    "httpx>=0.27",
+]
+keywords = ["ai", "agents", "runtime", "llm", "multi-agent", "agentos"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+homepage = "https://github.com/WAHIB-EL-KHADIRI/agentOS"
+repository = "https://github.com/WAHIB-EL-KHADIRI/agentOS"
+documentation = "https://github.com/WAHIB-EL-KHADIRI/agentOS/tree/main/crates/sdk/python"
+changelog = "https://github.com/WAHIB-EL-KHADIRI/agentOS/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agentos*"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "build>=1.0",
+]
+
+[tool.setuptools.package-data]
+agentos = ["py.typed"]

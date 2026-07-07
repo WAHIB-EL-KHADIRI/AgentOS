@@ -1,0 +1,16 @@
+[package]
+name = "agentos-code-review-example"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+agentos-sdk = { path = "../../crates/sdk" }
+agentos-bus = { path = "../../crates/bus" }
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+async-trait.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true

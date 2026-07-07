@@ -1,0 +1,13 @@
+[package]
+name = "agentos-sdk-examples"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+agentos-sdk = { path = "../../crates/sdk" }
+tokio = { workspace = true, features = ["rt", "macros"] }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+async-trait.workspace = true

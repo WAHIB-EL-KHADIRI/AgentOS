@@ -1,0 +1,11 @@
+name: simple-yaml-agent
+description: "A minimal agent defined as a YAML manifest"
+runtime: native
+restart: on-failure
+prompt: "You are a helpful assistant that answers questions concisely."
+capabilities:
+  - web-search
+  - code-execution
+permissions:
+  - network
+  - filesystem:read

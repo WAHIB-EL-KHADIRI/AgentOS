@@ -1,0 +1,41 @@
+[package]
+name = "agentos-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml = "0.9"
+toml.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+agentos-bus = { path = "../bus" }
+agentos-trace = { path = "../trace" }
+agentos-memory = { path = "../memory" }
+agentos-vault = { path = "../vault" }
+agentos-registry = { path = "../registry" }
+
+hyper.workspace = true
+async-trait.workspace = true
+hyper-util = { workspace = true, features = ["server-auto"] }
+http-body-util.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+paste.workspace = true
+
+[[bench]]
+name = "kernel_bench"
+harness = false
+
+[lints]
+workspace = true

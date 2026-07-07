@@ -1,0 +1,51 @@
+# Rust build artifacts
+target/
+**/target/
+*.pdb
+
+# Node / dashboard / TypeScript build artifacts
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
+
+# Python SDK build artifacts
+**/.pytest_cache/
+**/.ruff_cache/
+**/*.egg-info/
+**/__pycache__/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Local AgentOS runtime/demo state
+.agentos/
+.claude/
+
+# Secrets and credentials (prevent accidental commits)
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials
+secrets/
+id_rsa
+id_ed25519
+.aws/
+.gcp/
+.azure/

@@ -1,0 +1,47 @@
+repos:
+  - repo: https://github.com/pre-commit/mirrors-rust
+    rev: v1.0.0
+    hooks:
+      - id: cargo-fmt
+        args: ["--all", "--check"]
+      - id: cargo-clippy
+        args: ["--workspace", "--", "-D", "warnings"]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ".*\\.(md|toml)$"
+      - id: end-of-file-fixer
+        exclude: "^templates/"
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      - id: cargo-check
+        name: cargo check
+        entry: cargo check --workspace
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --workspace
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [push]
+
+      - id: cargo-deny
+        name: cargo audit
+        entry: cargo audit
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [push]

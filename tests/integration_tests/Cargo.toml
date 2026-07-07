@@ -1,0 +1,20 @@
+[package]
+name = "agentos-integration-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+agentos-kernel = { path = "../../crates/kernel" }
+agentos-bus = { path = "../../crates/bus" }
+agentos-memory = { path = "../../crates/memory" }
+agentos-trace = { path = "../../crates/trace" }
+agentos-vault = { path = "../../crates/vault" }
+agentos-registry = { path = "../../crates/registry" }
+tokio = { workspace = true, features = ["full"] }
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
