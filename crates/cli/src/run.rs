@@ -149,6 +149,40 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
             started_at,
         ),
     );
+
+    let execution_checkpoint = if system.has_llm_provider().await {
+        let step = system
+            .run_agent_once(&agent_id, "Begin executing the configured agent prompt.")
+            .await?;
+        let executed_at = current_time_millis();
+        append_log(
+            &mut cli_state,
+            &agent_id,
+            new_log_entry(
+                "llm_response",
+                format!(
+                    "{}:{} finished {}",
+                    step.provider, step.model, step.finish_reason
+                ),
+                executed_at,
+            ),
+        );
+        Some(append_checkpoint(
+            &mut cli_state,
+            &agent_id,
+            new_checkpoint(
+                &agent_id,
+                format!(
+                    "LLM response ({}:{}): {}",
+                    step.provider, step.model, step.content
+                ),
+                executed_at,
+            ),
+        ))
+    } else {
+        None
+    };
+
     save_state(&cli_state)?;
 
     println!("AgentOS runtime is live");
@@ -173,6 +207,9 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
     };
     println!("  status:     {status_str}");
     println!("  trace:      {start_checkpoint}");
+    if let Some(checkpoint) = &execution_checkpoint {
+        println!("  execution:  {checkpoint}");
+    }
     println!("  (press Ctrl+C to stop)");
 
     let lifecycle_result = monitor_lifecycle(Arc::clone(&system), agent_id.clone()).await;

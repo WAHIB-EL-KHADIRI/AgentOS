@@ -31,4 +31,4 @@ pub use persistence::Persistence;
 pub use plugins::{AgentHooks, PluginRegistry};
 pub use runtime_config::RuntimeConfig;
 pub use supervisor::Supervisor;
-pub use system::{AgentLogEntry, AgentOSSystem, SystemError, SystemResult};
+pub use system::{AgentExecutionStep, AgentLogEntry, AgentOSSystem, SystemError, SystemResult};

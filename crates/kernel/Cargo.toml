@@ -22,12 +22,14 @@ agentos-trace = { path = "../trace" }
 agentos-memory = { path = "../memory" }
 agentos-vault = { path = "../vault" }
 agentos-registry = { path = "../registry" }
+agentos-llm = { path = "../llm" }
 
 hyper.workspace = true
 async-trait.workspace = true
 hyper-util = { workspace = true, features = ["server-auto"] }
 http-body-util.workspace = true
 rusqlite = { workspace = true, features = ["bundled"] }
+futures.workspace = true
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

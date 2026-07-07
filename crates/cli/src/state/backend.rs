@@ -16,7 +16,7 @@ impl StateBackendKind {
         std::env::var("AGENTOS_STATE_BACKEND")
             .ok()
             .and_then(|value| Self::parse(&value).ok())
-            .unwrap_or(Self::Json)
+            .unwrap_or(Self::Sqlite)
     }
 
     pub fn parse(value: &str) -> anyhow::Result<Self> {

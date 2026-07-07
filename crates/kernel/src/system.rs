@@ -3,6 +3,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use agentos_bus::InMemoryBus;
+use agentos_llm::{
+    anthropic::AnthropicProvider, ollama::OllamaProvider, openai::OpenAIProvider,
+    ChatCompletionRequest, LLMProvider, Message,
+};
 use agentos_memory::{Embedder, HashingEmbedder, InMemoryStore, MemoryRecord, MemoryStore};
 use agentos_registry::{Registry, ServiceDescriptor};
 use agentos_trace::TraceRecorder;
@@ -32,6 +36,18 @@ pub enum SystemError {
     Io(#[from] std::io::Error),
 }
 
+#[derive(Debug, Clone)]
+pub struct AgentExecutionStep {
+    pub agent_id: String,
+    pub provider: String,
+    pub model: String,
+    pub prompt_checkpoint_id: String,
+    pub response_checkpoint_id: String,
+    pub content: String,
+    pub finish_reason: String,
+    pub tool_call_count: usize,
+}
+
 pub struct AgentOSSystem {
     pub supervisor: Supervisor,
     pub bus: Arc<InMemoryBus>,
@@ -43,6 +59,7 @@ pub struct AgentOSSystem {
     pub event_bus: Arc<EventBus>,
     pub agent_hooks: Arc<AgentHooks>,
     pub config: RuntimeConfig,
+    llm_provider: Arc<RwLock<Option<Arc<dyn LLMProvider>>>>,
     permission_set: Arc<RwLock<PermissionSet>>,
     agent_logs: Arc<RwLock<AgentLogStore>>,
 }
@@ -57,6 +74,7 @@ impl fmt::Debug for AgentOSSystem {
             .field("vault", &self.vault)
             .field("registry", &self.registry)
             .field("embedder", &"Arc<dyn Embedder>")
+            .field("llm_provider", &"Arc<RwLock<Option<Arc<dyn LLMProvider>>>>")
             .field("permission_set", &self.permission_set)
             .field("agent_logs", &self.agent_logs)
             .finish()
@@ -93,6 +111,7 @@ impl AgentOSSystem {
             event_bus,
             agent_hooks,
             config,
+            llm_provider: Arc::new(RwLock::new(configured_llm_provider_from_env())),
             permission_set: Arc::new(RwLock::new(PermissionSet::new())),
             agent_logs: Arc::new(RwLock::new(AgentLogStore::new())),
         }
@@ -139,6 +158,82 @@ impl AgentOSSystem {
         self.agent_hooks.on_spawned(self, &agent_id).await;
 
         Ok(handle)
+    }
+
+    pub async fn set_llm_provider(&self, provider: Arc<dyn LLMProvider>) {
+        let mut configured = self.llm_provider.write().await;
+        *configured = Some(provider);
+    }
+
+    pub async fn has_llm_provider(&self) -> bool {
+        self.llm_provider.read().await.is_some()
+    }
+
+    pub async fn run_agent_once(
+        &self,
+        agent_id: &str,
+        user_input: impl Into<String>,
+    ) -> AgentResult<AgentExecutionStep> {
+        let handle = self
+            .supervisor
+            .get(agent_id)
+            .await
+            .ok_or_else(|| AgentError::NotFound(agent_id.to_string()))?;
+
+        if !handle.is_running().await {
+            return Err(AgentError::NotRunning(agent_id.to_string()));
+        }
+
+        let provider = self
+            .llm_provider
+            .read()
+            .await
+            .clone()
+            .ok_or_else(|| AgentError::ConfigError("LLM provider is not configured".into()))?;
+
+        let spec = handle.spec().clone();
+        let system_prompt = if spec.prompt.trim().is_empty() {
+            "You are a careful AgentOS agent.".to_string()
+        } else {
+            spec.prompt.clone()
+        };
+        let user_input = user_input.into();
+        let provider_name = provider.name().to_string();
+        let model = provider.model().to_string();
+
+        let prompt_checkpoint_id = self
+            .record_thought(agent_id, &format!("prompt: {user_input}"))
+            .await;
+
+        let request = ChatCompletionRequest::new(
+            model.clone(),
+            vec![Message::system(system_prompt), Message::user(user_input)],
+        );
+        let response = provider
+            .chat(request)
+            .await
+            .map_err(|e| AgentError::CommandFailed(format!("LLM chat failed: {e}")))?;
+
+        let content = response.content.clone();
+        let response_checkpoint_id = self
+            .record_thought(agent_id, &format!("assistant: {content}"))
+            .await;
+        self.log_event(agent_id, "llm_response", &content).await;
+
+        Ok(AgentExecutionStep {
+            agent_id: agent_id.to_string(),
+            provider: provider_name,
+            model: if response.model.is_empty() {
+                model
+            } else {
+                response.model
+            },
+            prompt_checkpoint_id,
+            response_checkpoint_id,
+            content,
+            finish_reason: response.finish_reason,
+            tool_call_count: response.tool_calls.len(),
+        })
     }
 
     pub async fn record_thought(&self, agent_id: &str, content: &str) -> String {
@@ -255,6 +350,26 @@ impl AgentOSSystem {
     }
 }
 
+fn configured_llm_provider_from_env() -> Option<Arc<dyn LLMProvider>> {
+    let provider = std::env::var("AGENTOS_LLM_PROVIDER")
+        .unwrap_or_else(|_| "auto".to_string())
+        .trim()
+        .to_ascii_lowercase();
+
+    match provider.as_str() {
+        "openai" => OpenAIProvider::from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>),
+        "anthropic" => AnthropicProvider::from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>),
+        "ollama" => OllamaProvider::from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>),
+        "auto" | "" => OpenAIProvider::from_env()
+            .map(|p| Arc::new(p) as Arc<dyn LLMProvider>)
+            .or_else(|| AnthropicProvider::from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>)),
+        other => {
+            tracing::warn!(provider = %other, "unknown AGENTOS_LLM_PROVIDER value");
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentLogEntry {
     pub agent_id: String,
@@ -304,6 +419,60 @@ mod tests {
     use super::*;
     use crate::agent::AgentSpec;
 
+    #[derive(Debug)]
+    struct EchoProvider;
+
+    #[async_trait::async_trait]
+    impl LLMProvider for EchoProvider {
+        fn name(&self) -> &str {
+            "echo"
+        }
+
+        fn kind(&self) -> agentos_llm::ProviderKind {
+            agentos_llm::ProviderKind::Custom
+        }
+
+        fn model(&self) -> &str {
+            "echo-model"
+        }
+
+        async fn chat(
+            &self,
+            request: ChatCompletionRequest,
+        ) -> agentos_llm::LLMProviderResult<agentos_llm::ChatCompletionResponse> {
+            assert_eq!(request.model, "echo-model");
+            assert_eq!(request.messages.len(), 2);
+            Ok(agentos_llm::ChatCompletionResponse {
+                id: "echo-1".into(),
+                model: request.model,
+                content: format!("echo: {}", request.messages[1].content),
+                tool_calls: Vec::new(),
+                finish_reason: "stop".into(),
+                usage: None,
+            })
+        }
+
+        async fn chat_stream(
+            &self,
+            _request: ChatCompletionRequest,
+        ) -> agentos_llm::LLMProviderResult<
+            Box<
+                dyn futures::Stream<
+                        Item = agentos_llm::LLMProviderResult<agentos_llm::ChatCompletionChunk>,
+                    > + Send
+                    + Unpin,
+            >,
+        > {
+            Err(agentos_llm::LLMProviderError::StreamError(
+                "not implemented".into(),
+            ))
+        }
+
+        fn is_configured(&self) -> bool {
+            true
+        }
+    }
+
     #[tokio::test]
     async fn test_system_spawn_and_trace() {
         let system = AgentOSSystem::new();
@@ -316,6 +485,32 @@ mod tests {
 
         system.shutdown_all().await;
         assert!(!handle.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_system_run_agent_once_calls_llm_and_records_trace() {
+        let system = AgentOSSystem::new();
+        system.set_llm_provider(Arc::new(EchoProvider)).await;
+
+        let mut spec = AgentSpec::new("llm-test", "LLM Test");
+        spec.prompt = "You are under test.".into();
+        let handle = system.spawn_agent(spec).await.unwrap();
+        assert!(handle.is_running().await);
+
+        let step = system.run_agent_once("llm-test", "hello").await.unwrap();
+        assert_eq!(step.provider, "echo");
+        assert_eq!(step.model, "echo-model");
+        assert_eq!(step.content, "echo: hello");
+        assert_eq!(step.finish_reason, "stop");
+        assert_eq!(step.tool_call_count, 0);
+        assert!(!step.prompt_checkpoint_id.is_empty());
+        assert!(!step.response_checkpoint_id.is_empty());
+
+        let logs = system.get_logs("llm-test", 10).await;
+        assert!(logs.iter().any(|entry| entry.event_type == "thought"));
+        assert!(logs.iter().any(|entry| entry.event_type == "llm_response"));
+
+        system.shutdown_all().await;
     }
 
     #[tokio::test]

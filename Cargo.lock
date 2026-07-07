@@ -154,6 +154,7 @@ name = "agentos-kernel"
 version = "0.1.0"
 dependencies = [
  "agentos-bus",
+ "agentos-llm",
  "agentos-memory",
  "agentos-registry",
  "agentos-trace",
@@ -162,6 +163,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "criterion",
+ "futures",
  "http-body-util",
  "hyper",
  "hyper-util",

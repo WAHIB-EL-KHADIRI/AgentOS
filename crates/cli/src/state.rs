@@ -1350,6 +1350,10 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_is_default_state_backend() {
+        assert_eq!(StateBackendKind::from_env(), StateBackendKind::Sqlite);
+    }
+    #[test]
     fn sqlite_backend_insert_and_list_agents() {
         let dir = temp_state_dir("sqlite_agents");
         let path = dir.join("agentos.sqlite");
