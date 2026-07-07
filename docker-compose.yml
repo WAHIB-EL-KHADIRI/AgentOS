@@ -70,37 +70,6 @@ services:
       retries: 3
       start_period: 10s
 
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--protected-mode", "yes"]
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /data
-    profiles:
-      - cache
-      - full
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: agentos
-      POSTGRES_PASSWORD: ${AGENTOS_POSTGRES_PASSWORD:?Set AGENTOS_POSTGRES_PASSWORD before enabling the persistence profile}
-      POSTGRES_DB: agentos
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    profiles:
-      - persistence
-      - full
-
-volumes:
-  pgdata:
+# Note: no Redis/Postgres services are declared here on purpose. The current
+# runtime has no code path that uses them; external storage services will be
+# added to this stack together with the backend code that actually needs them.

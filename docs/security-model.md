@@ -69,14 +69,15 @@ tool sandboxing, encrypted storage, and network access policies.
   `Referrer-Policy`, and a deny-by-default `Content-Security-Policy`.
 - Bus protobuf requests are size-limited before decoding to reduce memory DoS
   risk from oversized request bodies.
-- SSE frames prefix every emitted line with `data:` so event payloads cannot
-  inject SSE control fields such as `id:` or `event:`.
+- SSE frames prefix every emitted payload line with `data:` so event payloads
+  cannot inject SSE control fields. Named `event:` fields are only produced
+  from server-side event types, with line breaks stripped defensively.
 - Dashboard production Nginx config uses a restrictive CSP and related browser
   hardening headers.
 - Container images run as a non-root `agentos` user and use `/data` as the
   writable runtime data directory.
-- Docker Compose does not publish Redis/Postgres ports by default and requires
-  an explicit Postgres password when the persistence profile is enabled.
+- Docker Compose declares only services the runtime actually uses; external
+  storage services will be added together with the code paths that need them.
 
 ## Production Deployment Requirements
 

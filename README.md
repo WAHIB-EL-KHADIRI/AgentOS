@@ -3,7 +3,6 @@
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)
 [![CI](https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml/badge.svg)](https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-230%2B-passing-green)](https://github.com/WAHIB-EL-KHADIRI/agentOS/actions)
 [![Windows](https://img.shields.io/badge/windows-supported-blue)](scripts/check.ps1)
 [![Docs](https://img.shields.io/badge/docs-available-blue)](docs/)
 [![Install](https://img.shields.io/badge/install-one--liner-success)](#quick-start)
@@ -106,6 +105,8 @@ Stable enough to use locally:
 - Rust workspace checks and tests.
 - Local state inspection, export, import, and cleanup flows.
 - Core crates for kernel, bus, trace, memory, vault, registry, SDK, and CLI.
+- SSE event stream started by `agentOS run` (default `127.0.0.1:8081/events`)
+  feeding the dashboard live agent and trace events.
 - Demo smoke checks that reject known fake-output fallback patterns.
 
 Experimental:
@@ -233,7 +234,7 @@ aligned with the roadmap.
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
 - Runtime walkthrough: [`docs/runtime-walkthrough.md`](docs/runtime-walkthrough.md)
 - Security model: [`docs/security-model.md`](docs/security-model.md)
-- Time-travel debugging: [`docs/time-travel-debugging.md`](docs/time-travel-debugging.md)
+- Trace replay debugging: [`docs/time-travel-debugging.md`](docs/time-travel-debugging.md)
 - Glossary: [`docs/project-glossary.md`](docs/project-glossary.md)
 - Pitch: [`docs/pitch.md`](docs/pitch.md)
 - Roadmap: [`ROADMAP.md`](ROADMAP.md)
