@@ -89,7 +89,7 @@ impl AgentHandle {
 pub struct AgentBuilder {
     id_hint: String,
     config: AgentConfig,
-    tools: Vec<Box<dyn Tool>>,
+    tools: Vec<Arc<dyn Tool>>,
 }
 
 impl AgentBuilder {
@@ -133,28 +133,44 @@ impl AgentBuilder {
     }
 
     pub fn tool(mut self, tool: Box<dyn Tool>) -> Self {
-        self.tools.push(tool);
+        self.tools.push(Arc::from(tool));
         self
     }
 
+    /// Spawn on a bare supervisor. Tools become `tool:<name>` capabilities
+    /// on the spec, but they can only execute when spawned on a full
+    /// [`AgentOSSystem`] (see [`AgentBuilder::spawn_on_system`]).
     pub async fn spawn_on_supervisor(self, supervisor: &Supervisor) -> SdkResult<AgentHandle> {
-        let tool_count = self.tools.len();
         let id = self.id_hint.clone();
-        let spec = self.into_spec(id);
+        let (spec, tools) = self.into_parts(id);
+        if !tools.is_empty() {
+            tracing::warn!(
+                tools = tools.len(),
+                "tools registered on a bare supervisor cannot execute; use spawn_on_system"
+            );
+        }
         let handle = supervisor.spawn(spec).await?;
         tracing::info!(
             agent_id = %handle.id,
-            tools = tool_count,
+            tools = tools.len(),
             "agent spawned via SDK supervisor"
         );
         Ok(AgentHandle::from_kernel(handle))
     }
 
+    /// Spawn on a full AgentOS system: the agent is supervised and every
+    /// SDK tool is registered with the runtime tool registry so the LLM
+    /// execution loop can invoke it.
     pub async fn spawn_on_system(self, system: &AgentOSSystem) -> SdkResult<AgentHandle> {
-        let tool_count = self.tools.len();
         let id = self.id_hint.clone();
-        let spec = self.into_spec(id);
+        let (spec, tools) = self.into_parts(id);
+        let tool_count = tools.len();
         let handle = system.spawn_agent(spec).await?;
+        for tool in tools {
+            system
+                .register_tool(&handle.id, Arc::new(crate::tool::SdkToolAdapter::new(tool)))
+                .await;
+        }
         tracing::info!(
             agent_id = %handle.id,
             tools = tool_count,
@@ -179,7 +195,7 @@ impl AgentBuilder {
         Ok(handle)
     }
 
-    fn into_spec(self, id: impl Into<String>) -> AgentSpec {
+    fn into_parts(self, id: impl Into<String>) -> (AgentSpec, Vec<Arc<dyn Tool>>) {
         let mut capabilities = self.config.capabilities;
         for tool in &self.tools {
             let capability = format!("tool:{}", tool.name());
@@ -188,14 +204,15 @@ impl AgentBuilder {
             }
         }
 
-        AgentSpec {
+        let spec = AgentSpec {
             id: id.into(),
             name: self.config.name,
             prompt: self.config.prompt,
             capabilities,
             max_restarts: self.config.max_restarts,
             heartbeat_timeout_secs: self.config.heartbeat_timeout_secs,
-        }
+        };
+        (spec, self.tools)
     }
 }
 
@@ -255,6 +272,58 @@ mod tests {
         assert!(supervisor.get("supervised-sdk-agent").await.is_some());
 
         supervisor.stop("supervised-sdk-agent").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_spawn_on_system_registers_executable_tools() {
+        use crate::tool::ToolResult;
+
+        struct EchoTool;
+
+        #[async_trait::async_trait]
+        impl Tool for EchoTool {
+            fn name(&self) -> &str {
+                "echo_tool"
+            }
+
+            fn description(&self) -> &str {
+                "echoes input"
+            }
+
+            async fn run(&self, input: &str) -> ToolResult {
+                Ok(format!("echo:{input}"))
+            }
+        }
+
+        let system = AgentOSSystem::new();
+        let handle = AgentBuilder::new("tooling-sdk-agent")
+            .prompt("You use tools.")
+            .tool(Box::new(EchoTool))
+            .spawn_on_system(&system)
+            .await
+            .expect("system spawn should succeed");
+
+        // Tool is advertised as a capability on the spec.
+        assert!(handle
+            .spec()
+            .capabilities
+            .contains(&"tool:echo_tool".to_string()));
+
+        // Tool is registered with the runtime and executable through the
+        // kernel's RuntimeTool interface (what the LLM loop invokes).
+        assert_eq!(system.tool_registry.count_for(&handle.id).await, 1);
+        let runtime_tool = system
+            .tool_registry
+            .get(&handle.id, "echo_tool")
+            .await
+            .expect("tool should be registered");
+        let output = runtime_tool
+            .invoke(&serde_json::json!({"text": "hi"}))
+            .await
+            .expect("tool invoke should succeed");
+        assert_eq!(output, "echo:{\"text\":\"hi\"}");
+
+        system.shutdown_all().await;
     }
 
     #[tokio::test]

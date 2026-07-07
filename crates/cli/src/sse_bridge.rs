@@ -112,6 +112,27 @@ impl EventListener for DashboardSseBridge {
                     .to_string(),
                 ));
             }
+            // Tool activity carries its own trace checkpoints in the kernel,
+            // so it also lands on the dashboard trace timeline.
+            SystemEventType::Custom(name) if is_tool_event(name) => {
+                self.trace_count.fetch_add(1, Ordering::Relaxed);
+                let status = if name == "tool_error" {
+                    "failed"
+                } else {
+                    "complete"
+                };
+                self.send(SseEvent::named(
+                    "trace_update",
+                    serde_json::json!({
+                        "checkpoint_id": event.id,
+                        "label": format!("{name}: {}", event.payload),
+                        "agent_id": agent_id,
+                        "status": status,
+                        "timestamp": iso_timestamp(event.timestamp_ms),
+                    })
+                    .to_string(),
+                ));
+            }
             _ => {}
         }
 
@@ -162,6 +183,10 @@ pub fn agent_status_label(state: &AgentState) -> &'static str {
     }
 }
 
+fn is_tool_event(name: &str) -> bool {
+    matches!(name, "tool_call" | "tool_result" | "tool_error")
+}
+
 /// Map kernel event types onto the dashboard's `EventType` union:
 /// `thought | tool_call | tool_result | error | state_change | message`.
 fn dashboard_event_type(event_type: &SystemEventType) -> &'static str {
@@ -171,6 +196,9 @@ fn dashboard_event_type(event_type: &SystemEventType) -> &'static str {
         SystemEventType::AgentSpawned
         | SystemEventType::AgentStopped
         | SystemEventType::AgentDegraded => "state_change",
+        SystemEventType::Custom(name) if name == "tool_call" => "tool_call",
+        SystemEventType::Custom(name) if name == "tool_result" => "tool_result",
+        SystemEventType::Custom(name) if name == "tool_error" => "error",
         _ => "message",
     }
 }
@@ -266,6 +294,49 @@ mod tests {
             dashboard_event_type(&SystemEventType::MemoryStored),
             "message"
         );
+    }
+
+    #[test]
+    fn test_tool_events_map_to_trace_update_and_typed_agent_event() {
+        let (bridge, mut rx) = bridge_with_channel();
+        bridge.on_event(&sample_event(SystemEventType::Custom("tool_call".into())));
+
+        let first = rx.try_recv().unwrap();
+        assert_eq!(first.event.as_deref(), Some("trace_update"));
+        let step: serde_json::Value = serde_json::from_str(&first.data).unwrap();
+        assert_eq!(step["status"], "complete");
+        assert_eq!(step["label"], "tool_call: payload text");
+
+        let second = rx.try_recv().unwrap();
+        assert_eq!(second.event.as_deref(), Some("agent_event"));
+        let entry: serde_json::Value = serde_json::from_str(&second.data).unwrap();
+        assert_eq!(entry["event_type"], "tool_call");
+    }
+
+    #[test]
+    fn test_tool_error_maps_to_failed_trace_status() {
+        let (bridge, mut rx) = bridge_with_channel();
+        bridge.on_event(&sample_event(SystemEventType::Custom("tool_error".into())));
+
+        let first = rx.try_recv().unwrap();
+        assert_eq!(first.event.as_deref(), Some("trace_update"));
+        let step: serde_json::Value = serde_json::from_str(&first.data).unwrap();
+        assert_eq!(step["status"], "failed");
+
+        let second = rx.try_recv().unwrap();
+        let entry: serde_json::Value = serde_json::from_str(&second.data).unwrap();
+        assert_eq!(entry["event_type"], "error");
+    }
+
+    #[test]
+    fn test_unrelated_custom_event_stays_message() {
+        let (bridge, mut rx) = bridge_with_channel();
+        bridge.on_event(&sample_event(SystemEventType::Custom("something".into())));
+
+        let first = rx.try_recv().unwrap();
+        assert_eq!(first.event.as_deref(), Some("agent_event"));
+        let entry: serde_json::Value = serde_json::from_str(&first.data).unwrap();
+        assert_eq!(entry["event_type"], "message");
     }
 
     #[test]

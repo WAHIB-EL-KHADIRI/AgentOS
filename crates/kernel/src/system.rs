@@ -5,7 +5,7 @@ use std::sync::Arc;
 use agentos_bus::InMemoryBus;
 use agentos_llm::{
     anthropic::AnthropicProvider, ollama::OllamaProvider, openai::OpenAIProvider,
-    ChatCompletionRequest, LLMProvider, Message,
+    ChatCompletionRequest, LLMProvider, Message, ToolCall, ToolDefinition,
 };
 use agentos_memory::{Embedder, HashingEmbedder, InMemoryStore, MemoryRecord, MemoryStore};
 use agentos_registry::{Registry, ServiceDescriptor};
@@ -20,7 +20,12 @@ use crate::handle::AgentHandle;
 use crate::plugins::AgentHooks;
 use crate::runtime_config::RuntimeConfig;
 use crate::supervisor::Supervisor;
+use crate::tools::{RuntimeTool, ToolRegistry};
 use crate::AgentResult;
+
+/// Upper bound on LLM tool rounds inside one execution step, so a model
+/// that keeps requesting tools cannot loop forever.
+const MAX_TOOL_ROUNDS: usize = 4;
 
 pub type SystemResult<T> = Result<T, SystemError>;
 
@@ -46,6 +51,19 @@ pub struct AgentExecutionStep {
     pub content: String,
     pub finish_reason: String,
     pub tool_call_count: usize,
+    pub tool_invocations: Vec<ToolInvocationRecord>,
+    pub rounds: usize,
+}
+
+/// One executed tool call inside an agent execution step.
+#[derive(Debug, Clone)]
+pub struct ToolInvocationRecord {
+    pub call_id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    pub success: bool,
+    pub output: String,
+    pub checkpoint_id: String,
 }
 
 pub struct AgentOSSystem {
@@ -59,6 +77,7 @@ pub struct AgentOSSystem {
     pub event_bus: Arc<EventBus>,
     pub agent_hooks: Arc<AgentHooks>,
     pub config: RuntimeConfig,
+    pub tool_registry: Arc<ToolRegistry>,
     llm_provider: Arc<RwLock<Option<Arc<dyn LLMProvider>>>>,
     permission_set: Arc<RwLock<PermissionSet>>,
     agent_logs: Arc<RwLock<AgentLogStore>>,
@@ -75,6 +94,7 @@ impl fmt::Debug for AgentOSSystem {
             .field("registry", &self.registry)
             .field("embedder", &"Arc<dyn Embedder>")
             .field("llm_provider", &"Arc<RwLock<Option<Arc<dyn LLMProvider>>>>")
+            .field("tool_registry", &self.tool_registry)
             .field("permission_set", &self.permission_set)
             .field("agent_logs", &self.agent_logs)
             .finish()
@@ -111,6 +131,7 @@ impl AgentOSSystem {
             event_bus,
             agent_hooks,
             config,
+            tool_registry: Arc::new(ToolRegistry::new()),
             llm_provider: Arc::new(RwLock::new(configured_llm_provider_from_env())),
             permission_set: Arc::new(RwLock::new(PermissionSet::new())),
             agent_logs: Arc::new(RwLock::new(AgentLogStore::new())),
@@ -169,6 +190,13 @@ impl AgentOSSystem {
         self.llm_provider.read().await.is_some()
     }
 
+    /// Register a runtime tool for an agent so the execution loop can
+    /// invoke it when the LLM requests it.
+    pub async fn register_tool(&self, agent_id: &str, tool: Arc<dyn RuntimeTool>) {
+        tracing::info!(agent_id = %agent_id, tool = %tool.name(), "runtime tool registered");
+        self.tool_registry.register(agent_id, tool).await;
+    }
+
     pub async fn run_agent_once(
         &self,
         agent_id: &str,
@@ -205,35 +233,181 @@ impl AgentOSSystem {
             .record_thought(agent_id, &format!("prompt: {user_input}"))
             .await;
 
-        let request = ChatCompletionRequest::new(
-            model.clone(),
-            vec![Message::system(system_prompt), Message::user(user_input)],
-        );
-        let response = provider
-            .chat(request)
-            .await
-            .map_err(|e| AgentError::CommandFailed(format!("LLM chat failed: {e}")))?;
+        let tools = self.tool_registry.tools_for(agent_id).await;
+        let tool_definitions: Vec<ToolDefinition> = tools
+            .iter()
+            .map(|tool| {
+                let mut def = ToolDefinition::new(tool.name(), tool.description());
+                if let Some(params) = tool.parameters() {
+                    def = def.with_parameters(params);
+                }
+                def
+            })
+            .collect();
 
-        let content = response.content.clone();
-        let response_checkpoint_id = self
-            .record_thought(agent_id, &format!("assistant: {content}"))
-            .await;
-        self.log_event(agent_id, "llm_response", &content).await;
+        let mut messages = vec![Message::system(system_prompt), Message::user(user_input)];
+        let mut tool_invocations: Vec<ToolInvocationRecord> = Vec::new();
+        let mut rounds = 0usize;
 
-        Ok(AgentExecutionStep {
-            agent_id: agent_id.to_string(),
-            provider: provider_name,
-            model: if response.model.is_empty() {
-                model
+        loop {
+            rounds += 1;
+            let mut request = ChatCompletionRequest::new(model.clone(), messages.clone());
+            request.tools = tool_definitions.clone();
+
+            let response = provider
+                .chat(request)
+                .await
+                .map_err(|e| AgentError::CommandFailed(format!("LLM chat failed: {e}")))?;
+
+            // Final answer: no tool calls requested in this round.
+            if response.tool_calls.is_empty() {
+                let content = response.content.clone();
+                let response_checkpoint_id = self
+                    .record_thought(agent_id, &format!("assistant: {content}"))
+                    .await;
+                self.log_event(agent_id, "llm_response", &content).await;
+
+                return Ok(AgentExecutionStep {
+                    agent_id: agent_id.to_string(),
+                    provider: provider_name,
+                    model: if response.model.is_empty() {
+                        model
+                    } else {
+                        response.model
+                    },
+                    prompt_checkpoint_id,
+                    response_checkpoint_id,
+                    content,
+                    finish_reason: response.finish_reason,
+                    tool_call_count: tool_invocations.len(),
+                    tool_invocations,
+                    rounds,
+                });
+            }
+
+            // Tool round: execute every requested call and record each step.
+            if !response.content.trim().is_empty() {
+                self.record_thought(agent_id, &format!("assistant: {}", response.content))
+                    .await;
+            }
+
+            let mut result_lines = Vec::new();
+            for call in &response.tool_calls {
+                let record = self.execute_tool_call(agent_id, call).await;
+                result_lines.push(format!(
+                    "{} -> {}",
+                    record.name,
+                    if record.success {
+                        record.output.clone()
+                    } else {
+                        format!("error: {}", record.output)
+                    }
+                ));
+                tool_invocations.push(record);
+            }
+
+            if rounds >= MAX_TOOL_ROUNDS {
+                let content =
+                    format!("tool round limit ({MAX_TOOL_ROUNDS}) reached before a final answer");
+                let response_checkpoint_id = self
+                    .record_thought(agent_id, &format!("assistant: {content}"))
+                    .await;
+                self.log_event(agent_id, "llm_response", &content).await;
+
+                return Ok(AgentExecutionStep {
+                    agent_id: agent_id.to_string(),
+                    provider: provider_name,
+                    model,
+                    prompt_checkpoint_id,
+                    response_checkpoint_id,
+                    content,
+                    finish_reason: "tool_rounds_exhausted".into(),
+                    tool_call_count: tool_invocations.len(),
+                    tool_invocations,
+                    rounds,
+                });
+            }
+
+            // Provider-agnostic continuation: tool results go back as a user
+            // message so the loop works with OpenAI, Anthropic, and Ollama
+            // alike. Native per-provider tool protocols (assistant.tool_calls
+            // for OpenAI, tool_result blocks for Anthropic) belong in the llm
+            // crate as a later improvement.
+            let assistant_text = if response.content.trim().is_empty() {
+                format!(
+                    "(requested tools: {})",
+                    response
+                        .tool_calls
+                        .iter()
+                        .map(|c| c.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             } else {
-                response.model
-            },
-            prompt_checkpoint_id,
-            response_checkpoint_id,
-            content,
-            finish_reason: response.finish_reason,
-            tool_call_count: response.tool_calls.len(),
-        })
+                response.content.clone()
+            };
+            messages.push(Message::assistant(assistant_text));
+            messages.push(Message::user(format!(
+                "Tool results:\n{}",
+                result_lines.join("\n")
+            )));
+        }
+    }
+
+    /// Execute one LLM tool call against the registry, recording checkpoints,
+    /// logs, and system events. Tool failures are recorded, never fatal.
+    async fn execute_tool_call(&self, agent_id: &str, call: &ToolCall) -> ToolInvocationRecord {
+        let args_text = call.arguments.to_string();
+        let call_summary = format!("{}({args_text})", call.name);
+
+        {
+            let mut trace = self.trace_recorder.write().await;
+            trace.record_checkpoint(agent_id, format!("tool_call: {call_summary}"));
+        }
+        self.log_event(agent_id, "tool_call", &call_summary).await;
+        self.event_bus
+            .emit(
+                SystemEventType::Custom("tool_call".into()),
+                Some(agent_id.to_string()),
+                call_summary.clone(),
+            )
+            .await;
+
+        let outcome = match self.tool_registry.get(agent_id, &call.name).await {
+            Some(tool) => tool.invoke(&call.arguments).await,
+            None => Err(format!(
+                "tool '{}' is not registered for this agent",
+                call.name
+            )),
+        };
+        let (success, output) = match outcome {
+            Ok(output) => (true, output),
+            Err(error) => (false, error),
+        };
+
+        let label = if success { "tool_result" } else { "tool_error" };
+        let result_summary = format!("{} -> {output}", call.name);
+        let checkpoint_id = {
+            let mut trace = self.trace_recorder.write().await;
+            trace.record_checkpoint(agent_id, format!("{label}: {result_summary}"))
+        };
+        self.log_event(agent_id, label, &result_summary).await;
+        self.event_bus
+            .emit(
+                SystemEventType::Custom(label.into()),
+                Some(agent_id.to_string()),
+                result_summary,
+            )
+            .await;
+
+        ToolInvocationRecord {
+            call_id: call.id.clone(),
+            name: call.name.clone(),
+            arguments: call.arguments.clone(),
+            success,
+            output,
+            checkpoint_id,
+        }
     }
 
     pub async fn record_thought(&self, agent_id: &str, content: &str) -> String {
@@ -471,6 +645,224 @@ mod tests {
         fn is_configured(&self) -> bool {
             true
         }
+    }
+
+    /// Returns queued responses in order; panics if exhausted.
+    #[derive(Debug)]
+    struct ScriptedProvider {
+        responses: std::sync::Mutex<VecDeque<agentos_llm::ChatCompletionResponse>>,
+    }
+
+    impl ScriptedProvider {
+        fn new(responses: Vec<agentos_llm::ChatCompletionResponse>) -> Self {
+            Self {
+                responses: std::sync::Mutex::new(responses.into_iter().collect()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LLMProvider for ScriptedProvider {
+        fn name(&self) -> &str {
+            "scripted"
+        }
+
+        fn kind(&self) -> agentos_llm::ProviderKind {
+            agentos_llm::ProviderKind::Custom
+        }
+
+        fn model(&self) -> &str {
+            "scripted-model"
+        }
+
+        async fn chat(
+            &self,
+            _request: ChatCompletionRequest,
+        ) -> agentos_llm::LLMProviderResult<agentos_llm::ChatCompletionResponse> {
+            Ok(self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("scripted provider exhausted"))
+        }
+
+        async fn chat_stream(
+            &self,
+            _request: ChatCompletionRequest,
+        ) -> agentos_llm::LLMProviderResult<
+            Box<
+                dyn futures::Stream<
+                        Item = agentos_llm::LLMProviderResult<agentos_llm::ChatCompletionChunk>,
+                    > + Send
+                    + Unpin,
+            >,
+        > {
+            Err(agentos_llm::LLMProviderError::StreamError(
+                "not implemented".into(),
+            ))
+        }
+
+        fn is_configured(&self) -> bool {
+            true
+        }
+    }
+
+    struct UppercaseTool;
+
+    #[async_trait::async_trait]
+    impl RuntimeTool for UppercaseTool {
+        fn name(&self) -> &str {
+            "uppercase"
+        }
+
+        fn description(&self) -> &str {
+            "Uppercase the given text"
+        }
+
+        async fn invoke(&self, arguments: &serde_json::Value) -> Result<String, String> {
+            arguments
+                .get("text")
+                .and_then(|t| t.as_str())
+                .map(|t| t.to_uppercase())
+                .ok_or_else(|| "missing 'text' argument".to_string())
+        }
+    }
+
+    fn tool_call_response(
+        name: &str,
+        args: serde_json::Value,
+    ) -> agentos_llm::ChatCompletionResponse {
+        agentos_llm::ChatCompletionResponse {
+            id: "scripted-call".into(),
+            model: "scripted-model".into(),
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "call_1".into(),
+                name: name.into(),
+                arguments: args,
+            }],
+            finish_reason: "tool_calls".into(),
+            usage: None,
+        }
+    }
+
+    fn final_response(content: &str) -> agentos_llm::ChatCompletionResponse {
+        agentos_llm::ChatCompletionResponse {
+            id: "scripted-final".into(),
+            model: "scripted-model".into(),
+            content: content.into(),
+            tool_calls: Vec::new(),
+            finish_reason: "stop".into(),
+            usage: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_agent_once_executes_registered_tool() {
+        let system = AgentOSSystem::new();
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
+                tool_call_response("uppercase", serde_json::json!({"text": "hi"})),
+                final_response("done: HI"),
+            ])))
+            .await;
+
+        system
+            .register_tool("tool-test", Arc::new(UppercaseTool))
+            .await;
+        system
+            .spawn_agent(AgentSpec::new("tool-test", "Tool Test"))
+            .await
+            .unwrap();
+
+        let step = system
+            .run_agent_once("tool-test", "please uppercase")
+            .await
+            .unwrap();
+
+        assert_eq!(step.rounds, 2);
+        assert_eq!(step.tool_call_count, 1);
+        assert_eq!(step.tool_invocations.len(), 1);
+        let invocation = &step.tool_invocations[0];
+        assert!(invocation.success);
+        assert_eq!(invocation.name, "uppercase");
+        assert_eq!(invocation.output, "HI");
+        assert!(!invocation.checkpoint_id.is_empty());
+        assert_eq!(step.content, "done: HI");
+        assert_eq!(step.finish_reason, "stop");
+
+        let logs = system.get_logs("tool-test", 50).await;
+        assert!(logs.iter().any(|e| e.event_type == "tool_call"));
+        assert!(logs.iter().any(|e| e.event_type == "tool_result"));
+
+        let events = system.event_bus.read_for_agent("tool-test").await;
+        assert!(events
+            .iter()
+            .any(|e| e.event_type == SystemEventType::Custom("tool_call".into())));
+        assert!(events
+            .iter()
+            .any(|e| e.event_type == SystemEventType::Custom("tool_result".into())));
+
+        system.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn test_run_agent_once_unknown_tool_records_error() {
+        let system = AgentOSSystem::new();
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
+                tool_call_response("missing_tool", serde_json::json!({})),
+                final_response("recovered"),
+            ])))
+            .await;
+        system
+            .spawn_agent(AgentSpec::new("missing-tool-test", "Missing Tool Test"))
+            .await
+            .unwrap();
+
+        let step = system
+            .run_agent_once("missing-tool-test", "go")
+            .await
+            .unwrap();
+
+        assert_eq!(step.tool_invocations.len(), 1);
+        assert!(!step.tool_invocations[0].success);
+        assert!(step.tool_invocations[0].output.contains("not registered"));
+        assert_eq!(step.content, "recovered");
+
+        let logs = system.get_logs("missing-tool-test", 50).await;
+        assert!(logs.iter().any(|e| e.event_type == "tool_error"));
+
+        system.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn test_run_agent_once_tool_round_cap() {
+        let responses = (0..MAX_TOOL_ROUNDS)
+            .map(|_| tool_call_response("uppercase", serde_json::json!({"text": "loop"})))
+            .collect::<Vec<_>>();
+
+        let system = AgentOSSystem::new();
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(responses)))
+            .await;
+        system
+            .register_tool("loop-test", Arc::new(UppercaseTool))
+            .await;
+        system
+            .spawn_agent(AgentSpec::new("loop-test", "Loop Test"))
+            .await
+            .unwrap();
+
+        let step = system.run_agent_once("loop-test", "go").await.unwrap();
+
+        assert_eq!(step.finish_reason, "tool_rounds_exhausted");
+        assert_eq!(step.rounds, MAX_TOOL_ROUNDS);
+        assert_eq!(step.tool_call_count, MAX_TOOL_ROUNDS);
+        assert!(step.tool_invocations.iter().all(|t| t.success));
+
+        system.shutdown_all().await;
     }
 
     #[tokio::test]

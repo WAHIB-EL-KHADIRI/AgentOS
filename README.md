@@ -115,6 +115,10 @@ Experimental:
 - WASM plugin runtime and plugin templates.
 - Docker Compose packaging.
 - LLM provider integrations.
+- LLM tool execution loop: tools registered through the SDK are executed
+  when the model requests them, with every call and result recorded as
+  trace checkpoints, logs, and live dashboard events (capped rounds,
+  provider-agnostic result passing).
 - Python and TypeScript SDK packaging.
 - Marketplace commands and plugin distribution ideas.
 

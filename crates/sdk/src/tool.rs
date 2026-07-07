@@ -43,3 +43,36 @@ impl fmt::Debug for dyn Tool {
             .finish()
     }
 }
+
+/// Adapts an SDK [`Tool`] to the kernel's [`RuntimeTool`] so tools built
+/// with the SDK execute inside the runtime's LLM tool loop.
+pub(crate) struct SdkToolAdapter {
+    inner: std::sync::Arc<dyn Tool>,
+}
+
+impl SdkToolAdapter {
+    pub(crate) fn new(inner: std::sync::Arc<dyn Tool>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl agentos_kernel::RuntimeTool for SdkToolAdapter {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+
+    async fn invoke(&self, arguments: &serde_json::Value) -> Result<String, String> {
+        // SDK tools take a raw string input: pass string arguments through
+        // unchanged, and serialize structured arguments as JSON.
+        let input = match arguments {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        self.inner.run(&input).await
+    }
+}

@@ -14,6 +14,7 @@ pub mod plugins;
 pub mod runtime_config;
 pub mod supervisor;
 pub mod system;
+pub mod tools;
 
 pub use agent::{Agent, AgentCommand, AgentId, AgentSpec, AgentState, LifecycleEvent};
 pub use agentos_bus::{AgentBusTrait, AgentEnvelope, InMemoryBus};
@@ -31,4 +32,8 @@ pub use persistence::Persistence;
 pub use plugins::{AgentHooks, PluginRegistry};
 pub use runtime_config::RuntimeConfig;
 pub use supervisor::Supervisor;
-pub use system::{AgentExecutionStep, AgentLogEntry, AgentOSSystem, SystemError, SystemResult};
+pub use system::{
+    AgentExecutionStep, AgentLogEntry, AgentOSSystem, SystemError, SystemResult,
+    ToolInvocationRecord,
+};
+pub use tools::{RuntimeTool, ToolRegistry};
