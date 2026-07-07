@@ -41,6 +41,28 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
     // Create the full AgentOS system
     let system = Arc::new(AgentOSSystem::with_config(runtime_config.clone()));
 
+    // Restore encrypted secrets when AGENTOS_VAULT_KEY is configured. A
+    // decrypt failure is fatal on purpose: continuing would let the
+    // write-through path overwrite the vault file with a different key.
+    let restored_agents = system
+        .load_persisted_secrets()
+        .await
+        .map_err(|e| anyhow::anyhow!("cannot restore encrypted vault: {e}"))?;
+    if restored_agents > 0 {
+        info!(agents = restored_agents, "encrypted vault secrets restored");
+    }
+
+    // Refuse silently exposing an unauthenticated runtime beyond localhost.
+    let api_token = agentos_bus::ApiToken::from_env();
+    let local_hosts = ["127.0.0.1", "localhost", "::1"];
+    if !local_hosts.contains(&runtime_config.host.as_str()) && !api_token.required() {
+        eprintln!(
+            "warning: binding to '{}' without AGENTOS_API_TOKEN — all runtime APIs are unauthenticated",
+            runtime_config.host
+        );
+        eprintln!("         set AGENTOS_API_TOKEN to require Bearer auth on HTTP, gRPC, and SSE");
+    }
+
     // SSE event stream for the dashboard. The bridge subscribes before the
     // agent is spawned so the AgentSpawned event is forwarded too.
     let (sse_tx, sse_rx) = tokio::sync::broadcast::channel::<SseEvent>(1024);
@@ -218,6 +240,22 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
     println!(
         "  sse:        http://{}:{}/events",
         runtime_config.host, runtime_config.sse_port
+    );
+    println!(
+        "  auth:       {}",
+        if api_token.required() {
+            "bearer token required"
+        } else {
+            "open (set AGENTOS_API_TOKEN to protect)"
+        }
+    );
+    println!(
+        "  vault:      {}",
+        if system.has_vault_encryption() {
+            "encrypted persistence on"
+        } else {
+            "in-memory only (set AGENTOS_VAULT_KEY to persist)"
+        }
     );
     println!("  agent id:   {agent_id}");
     let st = agent_handle.state().await;

@@ -30,6 +30,31 @@ impl VaultEncryption {
         Self { key }
     }
 
+    /// Create from a hex-encoded key string (64 hex chars = 32 bytes).
+    pub fn from_hex(hex_key: &str) -> Result<Self, VaultError> {
+        let decoded = hex::decode(hex_key.trim()).map_err(|_| {
+            VaultError::Encryption("vault key must be valid hex (64 hex characters)".into())
+        })?;
+        let key: [u8; KEY_LEN] = decoded.try_into().map_err(|_| {
+            VaultError::Encryption(format!(
+                "vault key must be exactly {KEY_LEN} bytes (64 hex characters)"
+            ))
+        })?;
+        Ok(Self::from_key(key))
+    }
+
+    /// Load the encryption key from the `AGENTOS_VAULT_KEY` environment
+    /// variable. Returns `Ok(None)` when the variable is absent or empty;
+    /// returns an error when it is present but malformed, so a typo never
+    /// silently downgrades to an unencrypted or random-key setup.
+    pub fn from_env() -> Result<Option<Self>, VaultError> {
+        match std::env::var("AGENTOS_VAULT_KEY") {
+            Err(_) => Ok(None),
+            Ok(value) if value.trim().is_empty() => Ok(None),
+            Ok(value) => Self::from_hex(&value).map(Some),
+        }
+    }
+
     /// Export the current key as hex string (for backup).
     pub fn export_key(&self) -> String {
         hex::encode(self.key)
@@ -170,6 +195,23 @@ mod tests {
         let encrypted = enc.encrypt(data).unwrap();
         let decrypted = enc.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted, data);
+    }
+
+    #[test]
+    fn test_from_hex_roundtrip() {
+        let hex_key = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let enc = VaultEncryption::from_hex(hex_key).unwrap();
+        assert_eq!(enc.export_key(), hex_key);
+    }
+
+    #[test]
+    fn test_from_hex_rejects_bad_input() {
+        assert!(VaultEncryption::from_hex("not-hex").is_err());
+        assert!(VaultEncryption::from_hex("abcd").is_err());
+        // 63 chars: odd length
+        assert!(VaultEncryption::from_hex(&"a".repeat(63)).is_err());
+        // 66 chars: wrong byte count
+        assert!(VaultEncryption::from_hex(&"ab".repeat(33)).is_err());
     }
 
     #[test]

@@ -64,6 +64,20 @@ tool sandboxing, encrypted storage, and network access policies.
 ## Implemented Defensive Defaults
 
 - Runtime HTTP/gRPC listeners default to `127.0.0.1` unless explicitly changed.
+- Optional shared-token authentication (`AGENTOS_API_TOKEN`): when set,
+  `/metrics`, the agent inspection API, bus Publish/Subscribe, and the SSE
+  event stream require `Authorization: Bearer <token>` (SSE also accepts a
+  `?token=` query parameter because `EventSource` cannot set headers).
+  Liveness endpoints stay open for container healthchecks. Token comparison
+  is constant-time. `agentOS run` warns when binding beyond localhost
+  without a token.
+- Encrypted vault persistence (`AGENTOS_VAULT_KEY`, AES-256-GCM): secrets
+  set through the runtime are written to
+  `AGENTOS_DATA_DIR/vault/secrets.enc` encrypted and restored on startup.
+  There is no plaintext persistence path: encryption is a required argument
+  of the vault save/load API. Without a key, secrets stay in memory only. A
+  malformed key disables persistence loudly instead of downgrading; a wrong
+  key fails startup instead of overwriting the vault file.
 - Built-in JSON endpoints return `Content-Type: application/json` and defensive
   browser headers such as `X-Content-Type-Options`, `X-Frame-Options`,
   `Referrer-Policy`, and a deny-by-default `Content-Security-Policy`.

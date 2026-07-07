@@ -1,8 +1,11 @@
 #![forbid(unsafe_code)]
 
+pub mod auth;
 pub mod grpc;
 pub mod in_memory;
 pub mod websocket;
+
+pub use auth::ApiToken;
 
 pub use grpc::{
     start_sse_server, GrpcBusClient, GrpcBusEndpoint, ProtoAgentEnvelope, PublishRequest,

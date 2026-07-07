@@ -10,13 +10,14 @@ use agentos_llm::{
 use agentos_memory::{Embedder, HashingEmbedder, InMemoryStore, MemoryRecord, MemoryStore};
 use agentos_registry::{Registry, ServiceDescriptor};
 use agentos_trace::TraceRecorder;
-use agentos_vault::{PermissionSet, Vault};
+use agentos_vault::{PermissionSet, Vault, VaultEncryption};
 use tokio::sync::RwLock;
 
 use crate::agent::AgentSpec;
 use crate::error::AgentError;
 use crate::events::{EventBus, SystemEventType};
 use crate::handle::AgentHandle;
+use crate::persistence::Persistence;
 use crate::plugins::AgentHooks;
 use crate::runtime_config::RuntimeConfig;
 use crate::supervisor::Supervisor;
@@ -79,6 +80,7 @@ pub struct AgentOSSystem {
     pub config: RuntimeConfig,
     pub tool_registry: Arc<ToolRegistry>,
     llm_provider: Arc<RwLock<Option<Arc<dyn LLMProvider>>>>,
+    vault_encryption: Option<Arc<VaultEncryption>>,
     permission_set: Arc<RwLock<PermissionSet>>,
     agent_logs: Arc<RwLock<AgentLogStore>>,
 }
@@ -95,6 +97,10 @@ impl fmt::Debug for AgentOSSystem {
             .field("embedder", &"Arc<dyn Embedder>")
             .field("llm_provider", &"Arc<RwLock<Option<Arc<dyn LLMProvider>>>>")
             .field("tool_registry", &self.tool_registry)
+            .field(
+                "vault_encryption",
+                &self.vault_encryption.as_ref().map(|_| "configured"),
+            )
             .field("permission_set", &self.permission_set)
             .field("agent_logs", &self.agent_logs)
             .finish()
@@ -133,9 +139,21 @@ impl AgentOSSystem {
             config,
             tool_registry: Arc::new(ToolRegistry::new()),
             llm_provider: Arc::new(RwLock::new(configured_llm_provider_from_env())),
+            vault_encryption: vault_encryption_from_env(),
             permission_set: Arc::new(RwLock::new(PermissionSet::new())),
             agent_logs: Arc::new(RwLock::new(AgentLogStore::new())),
         }
+    }
+
+    /// Inject a vault encryption key directly (tests, embedders). Runtime
+    /// callers normally configure it through `AGENTOS_VAULT_KEY`.
+    pub fn with_vault_encryption(mut self, encryption: VaultEncryption) -> Self {
+        self.vault_encryption = Some(Arc::new(encryption));
+        self
+    }
+
+    pub fn has_vault_encryption(&self) -> bool {
+        self.vault_encryption.is_some()
     }
 
     pub async fn spawn_agent(&self, spec: AgentSpec) -> AgentResult<AgentHandle> {
@@ -462,8 +480,60 @@ impl AgentOSSystem {
     }
 
     pub async fn set_secret(&self, agent_id: &str, key: &str, value: &str) {
+        {
+            let mut vault = self.vault.write().await;
+            vault.put(agent_id, key, value);
+        }
+        // Write-through: with a configured key, secrets survive restarts
+        // encrypted. A persistence failure is logged, never fatal.
+        if let Err(error) = self.persist_vault().await {
+            tracing::warn!(%error, "vault write-through persistence failed");
+        }
+    }
+
+    /// Persist the vault encrypted, when `AGENTOS_VAULT_KEY` is configured
+    /// and a data directory is set. No-op otherwise (in-memory only).
+    pub async fn persist_vault(&self) -> AgentResult<()> {
+        let Some(encryption) = &self.vault_encryption else {
+            return Ok(());
+        };
+        if self.config.data_dir.trim().is_empty() {
+            return Ok(());
+        }
+
+        let persistence = Persistence::new(&self.config.data_dir);
+        persistence.ensure_dirs().await?;
+        let vault = self.vault.read().await;
+        persistence.save_vault(&vault, encryption).await
+    }
+
+    /// Load previously persisted secrets into the vault. Returns the number
+    /// of agents whose secrets were restored; `Ok(0)` when encryption is not
+    /// configured or no vault file exists yet. Fails when a file exists but
+    /// the key cannot decrypt it, so a wrong key is loud, not silent.
+    pub async fn load_persisted_secrets(&self) -> AgentResult<usize> {
+        let Some(encryption) = &self.vault_encryption else {
+            return Ok(0);
+        };
+        if self.config.data_dir.trim().is_empty() {
+            return Ok(0);
+        }
+
+        let persistence = Persistence::new(&self.config.data_dir);
+        persistence.ensure_dirs().await?;
+        let loaded = persistence.load_vault(encryption).await?;
+
         let mut vault = self.vault.write().await;
-        vault.put(agent_id, key, value);
+        let mut restored_agents = 0usize;
+        for agent_id in loaded.agent_ids() {
+            restored_agents += 1;
+            for key in loaded.list_keys(&agent_id) {
+                if let Some(value) = loaded.peek(&agent_id, &key) {
+                    vault.put(&agent_id, &key, value);
+                }
+            }
+        }
+        Ok(restored_agents)
     }
 
     pub async fn get_secret(&self, agent_id: &str, key: &str) -> Option<String> {
@@ -521,6 +591,20 @@ impl AgentOSSystem {
     pub async fn check_permission(&self, permission: &agentos_vault::Permission) -> bool {
         let perms = self.permission_set.read().await;
         perms.contains(permission)
+    }
+}
+
+/// Read the vault key from `AGENTOS_VAULT_KEY`. A malformed key logs an
+/// error and disables persistence entirely (fail-safe: nothing is written
+/// to disk rather than writing with an unintended key).
+fn vault_encryption_from_env() -> Option<Arc<VaultEncryption>> {
+    match VaultEncryption::from_env() {
+        Ok(Some(encryption)) => Some(Arc::new(encryption)),
+        Ok(None) => None,
+        Err(error) => {
+            tracing::error!(%error, "invalid AGENTOS_VAULT_KEY; encrypted vault persistence disabled");
+            None
+        }
     }
 }
 
@@ -863,6 +947,65 @@ mod tests {
         assert!(step.tool_invocations.iter().all(|t| t.success));
 
         system.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn test_encrypted_secret_persistence_roundtrip() {
+        let dir =
+            std::env::temp_dir().join(format!("agentos_test_sys_vault_{}", uuid::Uuid::new_v4()));
+        let config = RuntimeConfig {
+            data_dir: dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+        let encryption = agentos_vault::VaultEncryption::new();
+        let key_hex = encryption.export_key();
+
+        // First system: store a secret; write-through persists it encrypted.
+        let system = AgentOSSystem::with_config(config.clone())
+            .with_vault_encryption(agentos_vault::VaultEncryption::from_hex(&key_hex).unwrap());
+        assert!(system.has_vault_encryption());
+        system
+            .set_secret("agent-1", "API_KEY", "sk-persisted")
+            .await;
+
+        let raw = std::fs::read(dir.join("vault").join("secrets.enc")).unwrap();
+        assert!(!String::from_utf8_lossy(&raw).contains("sk-persisted"));
+
+        // Second system with the same key: secrets are restored.
+        let restored = AgentOSSystem::with_config(config.clone())
+            .with_vault_encryption(agentos_vault::VaultEncryption::from_hex(&key_hex).unwrap());
+        let agents = restored.load_persisted_secrets().await.unwrap();
+        assert_eq!(agents, 1);
+        assert_eq!(
+            restored.get_secret("agent-1", "API_KEY").await,
+            Some("sk-persisted".into())
+        );
+
+        // A system with a different key must fail loudly, not silently.
+        let wrong = AgentOSSystem::with_config(config)
+            .with_vault_encryption(agentos_vault::VaultEncryption::new());
+        assert!(wrong.load_persisted_secrets().await.is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_secrets_stay_in_memory_without_encryption_key() {
+        let dir =
+            std::env::temp_dir().join(format!("agentos_test_sys_novault_{}", uuid::Uuid::new_v4()));
+        let config = RuntimeConfig {
+            data_dir: dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        let system = AgentOSSystem::with_config(config);
+        system.set_secret("agent-1", "API_KEY", "sk-memory").await;
+
+        // No key configured: nothing may be written to disk.
+        assert!(!dir.join("vault").join("secrets.enc").exists());
+        assert_eq!(system.load_persisted_secrets().await.unwrap(), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

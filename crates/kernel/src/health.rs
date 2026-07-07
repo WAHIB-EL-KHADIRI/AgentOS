@@ -98,6 +98,25 @@ impl HealthServer {
         let path = req.uri().path().to_string();
         let method = req.method().clone();
 
+        // Liveness endpoints stay open (container healthchecks and probes
+        // expose no runtime data); metrics and the inspection API require
+        // the bearer token when AGENTOS_API_TOKEN is configured.
+        if !matches!(path.as_str(), "/health" | "/health/live" | "/health/ready") {
+            let token = agentos_bus::ApiToken::from_env();
+            let auth_header = req
+                .headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok());
+            if !token.authorize_header(auth_header) {
+                let mut resp = text_response(StatusCode::UNAUTHORIZED, "unauthorized");
+                resp.headers_mut().insert(
+                    header::WWW_AUTHENTICATE,
+                    header::HeaderValue::from_static("Bearer"),
+                );
+                return Ok(resp);
+            }
+        }
+
         match (method, path.as_str()) {
             (Method::GET, "/health") => Ok(self.health_response()),
             (Method::GET, "/health/live") => Ok(self.liveness_response()),

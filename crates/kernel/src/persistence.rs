@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use agentos_trace::RecordedThought;
-use agentos_vault::Vault;
+use agentos_vault::{Vault, VaultEncryption};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
@@ -95,36 +95,48 @@ impl Persistence {
         Ok(snapshot.thoughts)
     }
 
-    pub async fn save_vault(&self, vault: &Vault) -> AgentResult<()> {
-        let json = serde_json::to_string_pretty(vault)
-            .map_err(|e| AgentError::Internal(format!("serialization error: {e}")))?;
+    fn vault_path(&self) -> PathBuf {
+        self.data_dir.join("vault").join("secrets.enc")
+    }
 
-        let path = self.data_dir.join("vault").join("secrets.json");
+    /// Persist the vault encrypted with AES-256-GCM. Secrets are never
+    /// written to disk in plaintext: encryption is a required argument,
+    /// not an option.
+    pub async fn save_vault(&self, vault: &Vault, encryption: &VaultEncryption) -> AgentResult<()> {
+        let ciphertext = encryption
+            .encrypt_json(vault)
+            .map_err(|e| AgentError::Internal(format!("vault encryption error: {e}")))?;
 
+        let path = self.vault_path();
         let mut file = tokio::fs::File::create(&path)
             .await
             .map_err(|e| AgentError::Internal(format!("cannot write vault file: {e}")))?;
 
-        file.write_all(json.as_bytes())
+        file.write_all(&ciphertext)
             .await
             .map_err(|e| AgentError::Internal(format!("cannot write vault: {e}")))?;
 
         Ok(())
     }
 
-    pub async fn load_vault(&self) -> AgentResult<Vault> {
-        let path = self.data_dir.join("vault").join("secrets.json");
+    /// Load and decrypt the persisted vault. Returns an empty vault when no
+    /// file exists yet; fails when the key does not match the file.
+    pub async fn load_vault(&self, encryption: &VaultEncryption) -> AgentResult<Vault> {
+        let path = self.vault_path();
 
         if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
             return Ok(Vault::new());
         }
 
-        let content = tokio::fs::read_to_string(&path)
+        let ciphertext = tokio::fs::read(&path)
             .await
             .map_err(|e| AgentError::Internal(format!("cannot read vault file: {e}")))?;
 
-        let vault: Vault = serde_json::from_str(&content)
-            .map_err(|e| AgentError::Internal(format!("cannot parse vault: {e}")))?;
+        let vault: Vault = encryption.decrypt_json(&ciphertext).map_err(|e| {
+            AgentError::Internal(format!(
+                "cannot decrypt vault (wrong AGENTOS_VAULT_KEY?): {e}"
+            ))
+        })?;
 
         Ok(vault)
     }
@@ -180,20 +192,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_persistence_save_and_load_vault() {
+    async fn test_persistence_save_and_load_vault_encrypted() {
         let dir = std::env::temp_dir().join(format!("agentos_test_vault_{}", uuid::Uuid::new_v4()));
         let persist = Persistence::new(&dir);
         persist.ensure_dirs().await.unwrap();
+        let encryption = VaultEncryption::new();
 
         let mut vault = Vault::new();
         vault.put("agent-1", "API_KEY", "sk-123");
         vault.put("agent-1", "SECRET", "value");
 
-        persist.save_vault(&vault).await.unwrap();
+        persist.save_vault(&vault, &encryption).await.unwrap();
 
-        let loaded = persist.load_vault().await.unwrap();
+        let loaded = persist.load_vault(&encryption).await.unwrap();
         assert!(loaded.has_secret("agent-1", "API_KEY"));
         assert!(loaded.has_secret("agent-1", "SECRET"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_vault_file_never_contains_plaintext_secrets() {
+        let dir =
+            std::env::temp_dir().join(format!("agentos_test_vault_plain_{}", uuid::Uuid::new_v4()));
+        let persist = Persistence::new(&dir);
+        persist.ensure_dirs().await.unwrap();
+        let encryption = VaultEncryption::new();
+
+        let mut vault = Vault::new();
+        vault.put("agent-1", "API_KEY", "sk-super-secret-value");
+        persist.save_vault(&vault, &encryption).await.unwrap();
+
+        let raw = std::fs::read(dir.join("vault").join("secrets.enc")).unwrap();
+        let raw_text = String::from_utf8_lossy(&raw);
+        assert!(!raw_text.contains("sk-super-secret-value"));
+        assert!(!raw_text.contains("API_KEY"));
+        assert!(serde_json::from_slice::<serde_json::Value>(&raw).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_vault_load_with_wrong_key_fails() {
+        let dir = std::env::temp_dir().join(format!(
+            "agentos_test_vault_wrongkey_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let persist = Persistence::new(&dir);
+        persist.ensure_dirs().await.unwrap();
+
+        let mut vault = Vault::new();
+        vault.put("agent-1", "API_KEY", "sk-123");
+        persist
+            .save_vault(&vault, &VaultEncryption::new())
+            .await
+            .unwrap();
+
+        let result = persist.load_vault(&VaultEncryption::new()).await;
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_vault_load_missing_file_returns_empty() {
+        let dir = std::env::temp_dir().join(format!(
+            "agentos_test_vault_missing_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let persist = Persistence::new(&dir);
+        persist.ensure_dirs().await.unwrap();
+
+        let loaded = persist.load_vault(&VaultEncryption::new()).await.unwrap();
+        assert!(loaded.list_keys("any-agent").is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

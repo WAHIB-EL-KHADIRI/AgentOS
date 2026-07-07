@@ -146,6 +146,20 @@ impl Vault {
             .unwrap_or_default()
     }
 
+    /// Agent ids that have at least one stored secret.
+    pub fn agent_ids(&self) -> Vec<String> {
+        self.secrets.keys().cloned().collect()
+    }
+
+    /// Read a secret value without recording an audit access. Intended for
+    /// system-level persistence and migration paths, not for agent reads.
+    pub fn peek(&self, agent_id: &str, key: &str) -> Option<&str> {
+        self.secrets
+            .get(agent_id)?
+            .get(key)
+            .map(|secret| secret.expose())
+    }
+
     pub fn has_secret(&self, agent_id: &str, key: &str) -> bool {
         self.secrets
             .get(agent_id)

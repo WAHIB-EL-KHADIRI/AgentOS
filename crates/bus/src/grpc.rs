@@ -555,6 +555,19 @@ async fn handle_grpc_request(
     let path = req.uri().path().to_string();
     let method = req.method().clone();
 
+    // Bare liveness stays open; everything that moves messages requires the
+    // API token when one is configured.
+    if path != "/health" {
+        let token = crate::auth::ApiToken::from_env();
+        let auth_header = req
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok());
+        if !token.authorize_header(auth_header) {
+            return Ok(unauthorized());
+        }
+    }
+
     match (method, path.as_str()) {
         (Method::POST, "/agentos.bus.v1.AgentBus/Publish") => {
             handle_publish(req, bus, subscribers).await
@@ -565,6 +578,15 @@ async fn handle_grpc_request(
         (Method::GET, "/health") => Ok(json_response(r#"{"status":"ok"}"#)),
         _ => Ok(not_found()),
     }
+}
+
+fn unauthorized() -> Response<BoxBody> {
+    let mut resp = text_response(StatusCode::UNAUTHORIZED, "unauthorized");
+    resp.headers_mut().insert(
+        header::WWW_AUTHENTICATE,
+        header::HeaderValue::from_static("Bearer"),
+    );
+    resp
 }
 
 async fn handle_publish(
@@ -724,7 +746,19 @@ pub async fn start_sse_server(
                 let rx = rx.resubscribe();
                 async move {
                     match (req.method(), req.uri().path()) {
-                        (&Method::GET, "/events") => Ok::<_, Infallible>(sse_handler(rx).await),
+                        (&Method::GET, "/events") => {
+                            // EventSource cannot set headers, so the SSE
+                            // surface accepts the token as a query param too.
+                            let token = crate::auth::ApiToken::from_env();
+                            let auth_header = req
+                                .headers()
+                                .get(header::AUTHORIZATION)
+                                .and_then(|v| v.to_str().ok());
+                            if !token.authorize_header_or_query(auth_header, req.uri().query()) {
+                                return Ok::<_, Infallible>(unauthorized());
+                            }
+                            Ok::<_, Infallible>(sse_handler(rx).await)
+                        }
                         _ => Ok(not_found()),
                     }
                 }
