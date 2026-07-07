@@ -63,7 +63,7 @@ known fake-output fallback patterns.
 The script uses:
 
 ```bash
-agentOS init-runtime --output .agentos/demo/agentos.demo.toml --http-port 18080 --grpc-port 15051 --force
+agentOS init-runtime --output .agentos/demo/agentos.demo.toml --http-port 18080 --grpc-port 15051 --sse-port 18081 --force
 agentOS inspect-config --agent examples/simple_agent.toml
 agentOS run --agent examples/simple_agent.toml --config .agentos/demo/agentos.demo.toml
 agentOS ps --all

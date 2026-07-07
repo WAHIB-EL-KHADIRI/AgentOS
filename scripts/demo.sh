@@ -15,6 +15,7 @@ AGENT_ID="${AGENTOS_DEMO_AGENT_ID:-agent_simple_agent}"
 DEMO_DIR="${AGENTOS_DEMO_DIR:-.agentos/demo}"
 HTTP_PORT="${AGENTOS_DEMO_HTTP_PORT:-18080}"
 GRPC_PORT="${AGENTOS_DEMO_GRPC_PORT:-15051}"
+SSE_PORT="${AGENTOS_DEMO_SSE_PORT:-18081}"
 RUN_SECONDS="${AGENTOS_DEMO_RUN_SECONDS:-5}"
 RUNTIME_CONFIG="$DEMO_DIR/agentos.demo.toml"
 MODE="${1:-run}"
@@ -191,7 +192,7 @@ echo "- The run command is interrupted after ${RUN_SECONDS}s so the demo can fin
 mkdir -p "$DEMO_DIR"
 
 run_step "Prepare an isolated runtime config" \
-  "$AGENTOS_BIN" init-runtime --output "$RUNTIME_CONFIG" --http-port "$HTTP_PORT" --grpc-port "$GRPC_PORT" --force
+  "$AGENTOS_BIN" init-runtime --output "$RUNTIME_CONFIG" --http-port "$HTTP_PORT" --grpc-port "$GRPC_PORT" --sse-port "$SSE_PORT" --force
 
 run_step "Inspect the demo agent config" \
   "$AGENTOS_BIN" inspect-config --agent "$AGENT_CONFIG"

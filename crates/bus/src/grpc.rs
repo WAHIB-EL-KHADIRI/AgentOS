@@ -461,6 +461,47 @@ fn sse_data_frame(data: &str) -> String {
     frame
 }
 
+/// A server-sent event destined for SSE clients such as the dashboard.
+///
+/// When `event` is set, the frame carries an SSE `event:` field so browser
+/// clients can route it with `EventSource.addEventListener(name, ...)`.
+/// When `event` is `None`, the frame is a plain `data:` message delivered to
+/// `EventSource.onmessage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SseEvent {
+    pub event: Option<String>,
+    pub data: String,
+}
+
+impl SseEvent {
+    pub fn named(event: impl Into<String>, data: impl Into<String>) -> Self {
+        Self {
+            event: Some(event.into()),
+            data: data.into(),
+        }
+    }
+
+    pub fn message(data: impl Into<String>) -> Self {
+        Self {
+            event: None,
+            data: data.into(),
+        }
+    }
+}
+
+fn sse_event_frame(event: &SseEvent) -> String {
+    let mut frame = String::new();
+    if let Some(name) = &event.event {
+        // Field values must not contain line breaks; strip them defensively.
+        let name = name.replace(['\r', '\n'], "");
+        frame.push_str("event: ");
+        frame.push_str(&name);
+        frame.push('\n');
+    }
+    frame.push_str(&sse_data_frame(&event.data));
+    frame
+}
+
 pub async fn start_grpc_server(
     addr: std::net::SocketAddr,
     bus: Arc<dyn AgentBusTrait + Send + Sync>,
@@ -630,10 +671,10 @@ async fn handle_subscribe(
 // ---------------------------------------------------------------------------
 
 /// Spawns an SSE endpoint on the given address that fans out every event
-/// published via `emit_event` to all connected SSE clients.
+/// received on `event_rx` to all connected SSE clients (dashboard, CLI).
 pub async fn start_sse_server(
     addr: std::net::SocketAddr,
-    event_rx: tokio::sync::broadcast::Receiver<String>,
+    event_rx: tokio::sync::broadcast::Receiver<SseEvent>,
 ) {
     use std::convert::Infallible;
 
@@ -647,7 +688,7 @@ pub async fn start_sse_server(
 
     info!("SSE event stream listening on http://{addr}/events");
 
-    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<String>(1024);
+    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<SseEvent>(1024);
 
     // Forward from the system event bus to the broadcast channel
     let tx = broadcast_tx.clone();
@@ -697,15 +738,15 @@ pub async fn start_sse_server(
     }
 }
 
-async fn sse_handler(rx: tokio::sync::broadcast::Receiver<String>) -> Response<BoxBody> {
+async fn sse_handler(rx: tokio::sync::broadcast::Receiver<SseEvent>) -> Response<BoxBody> {
     use futures::StreamExt;
 
     let stream = tokio_stream::wrappers::BroadcastStream::new(rx).map(|msg| {
-        let data = match msg {
+        let event = match msg {
             Ok(m) => m,
             Err(_) => return Ok(Frame::data(Bytes::from(sse_data_frame("{}")))),
         };
-        Ok::<_, hyper::Error>(Frame::data(Bytes::from(sse_data_frame(&data))))
+        Ok::<_, hyper::Error>(Frame::data(Bytes::from(sse_event_frame(&event))))
     });
 
     let body = StreamBody::new(stream).map_err(|e| e).boxed();
@@ -743,6 +784,30 @@ mod tests {
         assert_eq!(ep.describe(), "http://localhost:50051");
         let ep_tls = GrpcBusEndpoint::new("localhost:50051").with_tls(true);
         assert_eq!(ep_tls.describe(), "https://localhost:50051");
+    }
+
+    #[test]
+    fn test_sse_event_frame_named() {
+        let frame = sse_event_frame(&SseEvent::named("agent_started", r#"{"id":"a1"}"#));
+        assert_eq!(frame, "event: agent_started\ndata: {\"id\":\"a1\"}\n\n");
+    }
+
+    #[test]
+    fn test_sse_event_frame_unnamed_message() {
+        let frame = sse_event_frame(&SseEvent::message("hello"));
+        assert_eq!(frame, "data: hello\n\n");
+    }
+
+    #[test]
+    fn test_sse_event_frame_multiline_data() {
+        let frame = sse_event_frame(&SseEvent::named("agent_event", "line1\nline2"));
+        assert_eq!(frame, "event: agent_event\ndata: line1\ndata: line2\n\n");
+    }
+
+    #[test]
+    fn test_sse_event_frame_strips_newlines_from_event_name() {
+        let frame = sse_event_frame(&SseEvent::named("bad\nname", "x"));
+        assert_eq!(frame, "event: badname\ndata: x\n\n");
     }
 
     #[test]

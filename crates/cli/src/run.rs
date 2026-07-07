@@ -1,12 +1,13 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use agentos_bus::grpc;
+use agentos_bus::{grpc, SseEvent};
 use agentos_kernel::{AgentConfig, AgentOSSystem, HealthServer, LifecycleEvent, RuntimeConfig};
 use agentos_trace::TraceReplayer;
 use tracing::info;
 
 use crate::run_format::*;
+use crate::sse_bridge::{agent_info_json, agent_status_label, DashboardSseBridge};
 use crate::state::{
     append_checkpoint, append_log, checkpoints_count_for_agent, current_time_millis, doctor_state,
     export_state, has_agent, import_state, inspect_state, list_agents, load_state,
@@ -34,16 +35,70 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
     let agent_id = format!("agent_{}", agent_config.name.replace('-', "_"));
     let agent_name = agent_config.name.clone();
     let spec = agent_config.into_spec(agent_id.clone());
+    let capabilities = spec.capabilities.clone();
+    let started_at = current_time_millis();
 
     // Create the full AgentOS system
     let system = Arc::new(AgentOSSystem::with_config(runtime_config.clone()));
+
+    // SSE event stream for the dashboard. The bridge subscribes before the
+    // agent is spawned so the AgentSpawned event is forwarded too.
+    let (sse_tx, sse_rx) = tokio::sync::broadcast::channel::<SseEvent>(1024);
+    let bridge = DashboardSseBridge::new(
+        sse_tx.clone(),
+        agent_id.clone(),
+        agent_name.clone(),
+        capabilities.clone(),
+        started_at,
+    );
+    let trace_counter = bridge.trace_counter();
+    system.event_bus.subscribe(Box::new(bridge)).await;
+
+    let sse_addr: std::net::SocketAddr = runtime_config
+        .sse_addr()
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid SSE address: {e}"))?;
+    let sse_handle = tokio::spawn(async move {
+        agentos_bus::start_sse_server(sse_addr, sse_rx).await;
+    });
+
     let agent_handle = system.spawn_agent(spec).await?;
+
+    // Dashboards that connect after spawn missed the agent_started event;
+    // a periodic agent_status frame lets them converge on current state.
+    let status_handle = {
+        let status_tx = sse_tx.clone();
+        let agent_handle = agent_handle.clone();
+        let agent_id = agent_id.clone();
+        let agent_name = agent_name.clone();
+        let capabilities = capabilities.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                let state = agent_handle.state().await;
+                let _ = status_tx.send(SseEvent::named(
+                    "agent_status",
+                    agent_info_json(
+                        &agent_id,
+                        &agent_name,
+                        agent_status_label(&state),
+                        &capabilities,
+                        started_at,
+                        trace_counter.load(std::sync::atomic::Ordering::Relaxed),
+                    ),
+                ));
+            }
+        })
+    };
 
     info!(
         agent_id = %agent_id,
         host = %runtime_config.host,
         http_port = %runtime_config.http_port,
         grpc_port = %runtime_config.grpc_port,
+        sse_port = %runtime_config.sse_port,
         "AgentOS runtime started"
     );
 
@@ -67,7 +122,6 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
         grpc::start_grpc_server(grpc_addr, bus).await;
     });
 
-    let started_at = current_time_millis();
     let mut cli_state = load_state()?;
     upsert_agent(
         &mut cli_state,
@@ -105,6 +159,10 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
     println!(
         "  grpc:       {}:{}",
         runtime_config.host, runtime_config.grpc_port
+    );
+    println!(
+        "  sse:        http://{}:{}/events",
+        runtime_config.host, runtime_config.sse_port
     );
     println!("  agent id:   {agent_id}");
     let st = agent_handle.state().await;
@@ -160,6 +218,8 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
     // Abort server handles
     health_handle.abort();
     grpc_handle.abort();
+    sse_handle.abort();
+    status_handle.abort();
 
     println!("agent '{agent_id}' stopped");
     println!("  final status: {:?}", agent_handle.state().await);
@@ -485,11 +545,13 @@ pub async fn env_command(format: OutputFormat) -> anyhow::Result<()> {
 
     let http_port = config.http_port.to_string();
     let grpc_port = config.grpc_port.to_string();
+    let sse_port = config.sse_port.to_string();
     let max_agents = config.max_agents.to_string();
     let vars = [
         EnvVar::new("AGENTOS_HOST", &config.host, "Runtime bind host"),
         EnvVar::new("AGENTOS_HTTP_PORT", &http_port, "HTTP health and API port"),
         EnvVar::new("AGENTOS_GRPC_PORT", &grpc_port, "gRPC bus port"),
+        EnvVar::new("AGENTOS_SSE_PORT", &sse_port, "SSE event stream port"),
         EnvVar::new(
             "AGENTOS_MAX_AGENTS",
             &max_agents,
@@ -745,11 +807,13 @@ pub async fn init_agent_command(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn init_runtime_command(
     output: &str,
     host: &str,
     http_port: u16,
     grpc_port: u16,
+    sse_port: u16,
     max_agents: usize,
     force: bool,
 ) -> anyhow::Result<()> {
@@ -768,7 +832,7 @@ pub async fn init_runtime_command(
         }
     }
 
-    let config = render_runtime_config(host, http_port, grpc_port, max_agents);
+    let config = render_runtime_config(host, http_port, grpc_port, sse_port, max_agents);
     std::fs::write(output_path, config)?;
 
     println!("created AgentOS runtime config");
@@ -776,6 +840,7 @@ pub async fn init_runtime_command(
     println!("  host:       {host}");
     println!("  http:       {host}:{http_port}");
     println!("  grpc:       {host}:{grpc_port}");
+    println!("  sse:        {host}:{sse_port}/events");
     println!("  max agents: {max_agents}");
     println!("  next:       agentOS doctor");
 
@@ -865,6 +930,7 @@ pub async fn inspect_runtime_command(
                 "host": config.host,
                 "http": config.listen_addr(),
                 "grpc": config.grpc_addr(),
+                "sse": config.sse_addr(),
                 "max_agents": config.max_agents,
                 "heartbeat_timeout_secs": config.heartbeat_timeout_secs,
                 "log_level": config.log_level,
@@ -881,6 +947,7 @@ pub async fn inspect_runtime_command(
     println!("host:          {}", config.host);
     println!("http:          {}", config.listen_addr());
     println!("grpc:          {}", config.grpc_addr());
+    println!("sse:           {}", config.sse_addr());
     println!("max agents:    {}", config.max_agents);
     println!("heartbeat:     {}s", config.heartbeat_timeout_secs);
     println!("log level:     {}", config.log_level);
@@ -1462,6 +1529,13 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Vec<ValidationFinding> {
         findings.push(ValidationFinding::error(
             "ports",
             "http_port and grpc_port must be different",
+        ));
+    }
+
+    if config.sse_port == config.http_port || config.sse_port == config.grpc_port {
+        findings.push(ValidationFinding::error(
+            "ports",
+            "sse_port must differ from http_port and grpc_port",
         ));
     }
 
@@ -2111,7 +2185,7 @@ fn docs_catalog() -> &'static [DocLink] {
                 "End-to-end terminal workflow for run, ps, logs, trace, replay, backup, and clean.",
         },
         DocLink {
-            path: "docs/roadmap.md",
+            path: "ROADMAP.md",
             title: "Roadmap",
             description: "Milestones and contributor-friendly work areas.",
         },
@@ -2360,12 +2434,19 @@ fn escape_toml_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn render_runtime_config(host: &str, http_port: u16, grpc_port: u16, max_agents: usize) -> String {
+fn render_runtime_config(
+    host: &str,
+    http_port: u16,
+    grpc_port: u16,
+    sse_port: u16,
+    max_agents: usize,
+) -> String {
     let escaped_host = escape_toml_string(host);
     format!(
         "host = \"{escaped_host}\"\n\
 http_port = {http_port}\n\
 grpc_port = {grpc_port}\n\
+sse_port = {sse_port}\n\
 max_agents = {max_agents}\n\
 heartbeat_timeout_secs = 30\n\
 log_level = \"info\"\n\
@@ -2400,6 +2481,7 @@ fn render_workspace_runtime_config(
         "host = \"127.0.0.1\"\n\
 http_port = 8080\n\
 grpc_port = 50051\n\
+sse_port = 8081\n\
 max_agents = 100\n\
 heartbeat_timeout_secs = 30\n\
 log_level = \"info\"\n\

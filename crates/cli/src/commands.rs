@@ -136,6 +136,9 @@ pub(crate) enum Commands {
         /// gRPC bus port
         #[arg(long, default_value_t = 50051)]
         grpc_port: u16,
+        /// SSE event stream port (dashboard live events)
+        #[arg(long, default_value_t = 8081)]
+        sse_port: u16,
         /// Maximum number of supervised agents
         #[arg(long, default_value_t = 100)]
         max_agents: usize,

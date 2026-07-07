@@ -6,6 +6,7 @@ mod marketplace;
 mod repl;
 mod run;
 mod run_format;
+mod sse_bridge;
 mod state;
 mod supervisor;
 
@@ -68,10 +69,14 @@ async fn main() -> anyhow::Result<()> {
             host,
             http_port,
             grpc_port,
+            sse_port,
             max_agents,
             force,
         } => {
-            run::init_runtime_command(&output, &host, http_port, grpc_port, max_agents, force).await
+            run::init_runtime_command(
+                &output, &host, http_port, grpc_port, sse_port, max_agents, force,
+            )
+            .await
         }
         Commands::InitManifest {
             name,

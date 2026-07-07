@@ -104,8 +104,9 @@ agentOS init-agent --name ops-agent --template ops --output agents/ops.toml
 agentOS init-runtime --output agentos.toml
 ```
 
-Creates a runtime TOML config file with host, HTTP port, gRPC port, max agent
-count, data directory, and commented agent preload examples.
+Creates a runtime TOML config file with host, HTTP port, gRPC port, SSE event
+stream port, max agent count, data directory, and commented agent preload
+examples.
 
 ```bash
 agentOS init-workspace --path agentos-starter --template research

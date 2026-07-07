@@ -6,7 +6,7 @@ pub mod websocket;
 
 pub use grpc::{
     start_sse_server, GrpcBusClient, GrpcBusEndpoint, ProtoAgentEnvelope, PublishRequest,
-    PublishResponse, SubscribeRequest,
+    PublishResponse, SseEvent, SubscribeRequest,
 };
 pub use in_memory::InMemoryBus;
 

@@ -10,6 +10,9 @@ pub struct RuntimeConfig {
     #[serde(default = "default_grpc_port")]
     pub grpc_port: u16,
 
+    #[serde(default = "default_sse_port")]
+    pub sse_port: u16,
+
     #[serde(default = "default_host")]
     pub host: String,
 
@@ -47,6 +50,9 @@ fn default_http_port() -> u16 {
 fn default_grpc_port() -> u16 {
     50051
 }
+fn default_sse_port() -> u16 {
+    8081
+}
 fn default_host() -> String {
     "127.0.0.1".into()
 }
@@ -71,6 +77,7 @@ impl Default for RuntimeConfig {
         Self {
             http_port: default_http_port(),
             grpc_port: default_grpc_port(),
+            sse_port: default_sse_port(),
             host: default_host(),
             max_agents: default_max_agents(),
             heartbeat_timeout_secs: default_heartbeat_timeout(),
@@ -100,6 +107,11 @@ impl RuntimeConfig {
                 self.grpc_port = port;
             }
         }
+        if let Ok(v) = std::env::var("AGENTOS_SSE_PORT") {
+            if let Ok(port) = v.parse() {
+                self.sse_port = port;
+            }
+        }
         if let Ok(v) = std::env::var("AGENTOS_HOST") {
             self.host = v;
         }
@@ -123,6 +135,10 @@ impl RuntimeConfig {
     pub fn grpc_addr(&self) -> String {
         format!("{}:{}", self.host, self.grpc_port)
     }
+
+    pub fn sse_addr(&self) -> String {
+        format!("{}:{}", self.host, self.sse_port)
+    }
 }
 
 #[cfg(test)]
@@ -134,6 +150,7 @@ mod tests {
         let cfg = RuntimeConfig::default();
         assert_eq!(cfg.http_port, 8080);
         assert_eq!(cfg.grpc_port, 50051);
+        assert_eq!(cfg.sse_port, 8081);
         assert_eq!(cfg.host, "127.0.0.1");
     }
 
@@ -164,6 +181,7 @@ mod tests {
         let cfg = RuntimeConfig::default();
         assert_eq!(cfg.listen_addr(), "127.0.0.1:8080");
         assert_eq!(cfg.grpc_addr(), "127.0.0.1:50051");
+        assert_eq!(cfg.sse_addr(), "127.0.0.1:8081");
     }
 
     #[test]
