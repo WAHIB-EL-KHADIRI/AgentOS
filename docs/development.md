@@ -72,17 +72,19 @@ change runtime or state backend behavior.
 
 ## State Backends
 
-JSON is the default local state backend:
+SQLite is the default local state backend:
 
 ```bash
 agentOS ps --all
 ```
 
-SQLite is optional:
+JSON is still available (and remains the export/import format):
 
 ```bash
-agentOS --state-backend sqlite ps --all
+agentOS --state-backend json ps --all
 ```
+
+Existing JSON state can be moved over with `agentOS state migrate`.
 
 When changing state code, keep JSON backward-compatible and make sure export,
 import, inspect, doctor, clean, and migrate still work.

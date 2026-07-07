@@ -4,16 +4,16 @@ use clap::{Parser, Subcommand, ValueEnum};
 #[command(
     name = "agentOS",
     about = "AI Agent Operating Layer",
-    long_about = "AgentOS is a local runtime layer for AI agents. Use it to run agents, inspect state, read logs, replay trace checkpoints, and manage local JSON backups before SQLite persistence.",
+    long_about = "AgentOS is a local runtime layer for AI agents. Use it to run agents, inspect state, read logs, replay trace checkpoints, and manage local state with a SQLite backend (JSON export/import available for backups).",
     version
 )]
 pub(crate) struct Cli {
-    /// Select local state backend. JSON remains the default.
+    /// Select local state backend. SQLite is the default.
     #[arg(
         long,
         env = "AGENTOS_STATE_BACKEND",
         value_enum,
-        default_value_t = StateBackendArg::Json,
+        default_value_t = StateBackendArg::Sqlite,
         global = true
     )]
     pub(crate) state_backend: StateBackendArg,

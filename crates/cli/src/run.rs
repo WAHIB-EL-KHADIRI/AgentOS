@@ -150,35 +150,56 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
         ),
     );
 
+    // A failed LLM step must not take the runtime down: the agent stays
+    // supervised and the failure is recorded instead of propagated.
     let execution_checkpoint = if system.has_llm_provider().await {
-        let step = system
+        match system
             .run_agent_once(&agent_id, "Begin executing the configured agent prompt.")
-            .await?;
-        let executed_at = current_time_millis();
-        append_log(
-            &mut cli_state,
-            &agent_id,
-            new_log_entry(
-                "llm_response",
-                format!(
-                    "{}:{} finished {}",
-                    step.provider, step.model, step.finish_reason
-                ),
-                executed_at,
-            ),
-        );
-        Some(append_checkpoint(
-            &mut cli_state,
-            &agent_id,
-            new_checkpoint(
-                &agent_id,
-                format!(
-                    "LLM response ({}:{}): {}",
-                    step.provider, step.model, step.content
-                ),
-                executed_at,
-            ),
-        ))
+            .await
+        {
+            Ok(step) => {
+                let executed_at = current_time_millis();
+                append_log(
+                    &mut cli_state,
+                    &agent_id,
+                    new_log_entry(
+                        "llm_response",
+                        format!(
+                            "{}:{} finished {}",
+                            step.provider, step.model, step.finish_reason
+                        ),
+                        executed_at,
+                    ),
+                );
+                Some(append_checkpoint(
+                    &mut cli_state,
+                    &agent_id,
+                    new_checkpoint(
+                        &agent_id,
+                        format!(
+                            "LLM response ({}:{}): {}",
+                            step.provider, step.model, step.content
+                        ),
+                        executed_at,
+                    ),
+                ))
+            }
+            Err(error) => {
+                tracing::warn!(agent_id = %agent_id, %error, "LLM execution step failed; continuing without it");
+                eprintln!("warning: LLM execution step failed: {error}");
+                eprintln!("         the agent keeps running; check your provider credentials");
+                append_log(
+                    &mut cli_state,
+                    &agent_id,
+                    new_log_entry(
+                        "llm_error",
+                        format!("LLM execution step failed: {error}"),
+                        current_time_millis(),
+                    ),
+                );
+                None
+            }
+        }
     } else {
         None
     };
