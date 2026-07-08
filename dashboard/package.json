@@ -2,6 +2,8 @@
   "name": "@agentos/dashboard",
   "private": true,
   "version": "0.1.0",
+  "author": "WAHIB EL KHADIRI <wahibmaxim@gmail.com>",
+  "license": "(MIT OR Apache-2.0)",
   "type": "module",
   "scripts": {
     "dev": "vite",

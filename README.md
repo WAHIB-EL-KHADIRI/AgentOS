@@ -11,6 +11,8 @@ AgentOS is an open-source runtime layer for AI agents. It focuses on the
 infrastructure around agents: lifecycle, supervision, messaging, state, secrets,
 observability, and trace replay.
 
+**Created by [WAHIB EL KHADIRI](https://github.com/WAHIB-EL-KHADIRI)** — founder and architect.
+
 Most agent frameworks help you build an agent workflow. AgentOS focuses on what
 happens after that workflow needs to run as a long-lived process, fail clearly,
 restart carefully, and be inspected after the fact.
