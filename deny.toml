@@ -1,20 +1,19 @@
+# cargo-deny configuration (version 2 schema).
+# https://embarkstudios.github.io/cargo-deny/checks/index.html
+
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-notice = "warn"
-unsound = "deny"
-yanked = "deny"
+version = 2
+# version 2 defaults: vulnerability/unsound/yanked are errors.
 ignore = []
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Internal path dependencies carry no version; only registry wildcards matter.
+allow-wildcard-paths = true
 highlight = "all"
 deny = []
-skip = [
-    { name = "unicode-ident" },
-    { name = "serde_derive" },
-]
+skip = []
 skip-tree = []
 
 [sources]
@@ -23,7 +22,8 @@ unknown-git = "deny"
 allow-git = []
 
 [licenses]
-unlicensed = "deny"
+version = 2
+# version 2 defaults: anything not explicitly allowed is an error.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -37,9 +37,5 @@ allow = [
     "BSL-1.0",
     "MPL-2.0",
 ]
-deny = []
-copyleft = "warn"
-allow-osi-fsf-free = "neither"
-default = "deny"
 confidence-threshold = 0.8
 exceptions = []

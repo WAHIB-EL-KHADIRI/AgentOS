@@ -2,6 +2,7 @@
 name = "agentos-integration-tests"
 version.workspace = true
 edition.workspace = true
+publish = false
 license.workspace = true
 repository.workspace = true
 authors.workspace = true

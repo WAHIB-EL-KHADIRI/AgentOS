@@ -115,10 +115,7 @@ fn fork_unknown_checkpoint_reports_clear_error() {
     let text = output_text(&output);
 
     assert!(!output.status.success(), "{text}");
-    assert!(
-        text.contains("not found in any recorded session"),
-        "{text}"
-    );
+    assert!(text.contains("not found in any recorded session"), "{text}");
     assert!(text.contains("agentOS replay --session"), "{text}");
 
     // Without any selector the command explains its usage.
