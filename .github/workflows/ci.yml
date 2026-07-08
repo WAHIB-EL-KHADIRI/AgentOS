@@ -33,7 +33,17 @@ jobs:
         run: cd dashboard && npm ci
 
       - name: Repository check script
-        run: bash scripts/check.sh
+        run: bash scripts/check.sh 2>&1 | tee check_output.log
+
+      - name: Publish failure log to run summary
+        if: failure()
+        run: |
+          {
+            echo '## check.sh failure tail'
+            echo '```'
+            tail -c 60000 check_output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets
@@ -82,7 +92,17 @@ jobs:
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov
       - name: Generate coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info 2>&1 | tee coverage_output.log
+
+      - name: Publish failure log to run summary
+        if: failure()
+        run: |
+          {
+            echo '## coverage failure tail'
+            echo '```'
+            tail -c 60000 coverage_output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
