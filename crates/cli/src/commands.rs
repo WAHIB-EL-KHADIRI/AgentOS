@@ -275,18 +275,33 @@ pub(crate) enum Commands {
     },
     /// Replay visible trace state from a checkpoint
     Replay {
-        /// Checkpoint ID to replay from. Use `agentOS trace --id <agent_id>` to discover IDs.
+        /// Checkpoint ID to inspect from local CLI state. Use `agentOS trace --id <agent_id>` to discover IDs.
         #[arg(long)]
-        checkpoint: String,
+        checkpoint: Option<String>,
+        /// Agent ID whose recorded session should be re-executed deterministically (no API key needed)
+        #[arg(long)]
+        session: Option<String>,
+        /// Runtime config TOML (locates the data dir holding recorded sessions)
+        #[arg(long, default_value = "agentos.toml")]
+        config: String,
     },
-    /// Report that trace forking is not available yet
+    /// Fork a recorded session: replay a prefix deterministically, then continue live
     Fork {
-        /// Checkpoint ID to fork from
+        /// Exchange checkpoint ID to fork after (see `agentOS replay --session <agent_id>`)
         #[arg(long)]
-        from: String,
-        /// New prompt for the forked agent
+        from: Option<String>,
+        /// Agent ID whose recorded session to fork
+        #[arg(long)]
+        session: Option<String>,
+        /// Number of recorded exchanges to replay before continuing live
+        #[arg(long)]
+        at: Option<usize>,
+        /// New user input for the forked run (defaults to the recorded input)
         #[arg(long)]
         prompt: Option<String>,
+        /// Runtime config TOML (locates the data dir holding recorded sessions)
+        #[arg(long, default_value = "agentos.toml")]
+        config: String,
     },
     /// Start the interactive AgentOS REPL
     Repl,

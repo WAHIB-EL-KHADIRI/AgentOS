@@ -7,6 +7,7 @@ pub mod error;
 pub mod events;
 pub mod handle;
 pub mod health;
+pub mod journal;
 pub mod manifest;
 pub mod metrics;
 pub mod persistence;
@@ -27,6 +28,10 @@ pub use events::{
 };
 pub use handle::AgentHandle;
 pub use health::HealthServer;
+pub use journal::{
+    compare_replay, DriftKind, RecordedExchange, RecordedSession, RecordedToolInvocation,
+    ReplayDrift,
+};
 pub use manifest::{AgentManifest, ManifestRuntime, RestartPolicy};
 pub use persistence::Persistence;
 pub use plugins::{AgentHooks, PluginRegistry};

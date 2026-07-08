@@ -2,7 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use agentos_bus::{grpc, SseEvent};
-use agentos_kernel::{AgentConfig, AgentOSSystem, HealthServer, LifecycleEvent, RuntimeConfig};
+use agentos_kernel::{
+    AgentConfig, AgentOSSystem, HealthServer, LifecycleEvent, Persistence, RecordedSession,
+    RuntimeConfig,
+};
 use agentos_trace::TraceReplayer;
 use tracing::info;
 
@@ -2003,7 +2006,121 @@ pub async fn trace_command(agent_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn replay_command(checkpoint: &str) -> anyhow::Result<()> {
+pub async fn replay_command(
+    checkpoint: Option<&str>,
+    session: Option<&str>,
+    config_path: &str,
+) -> anyhow::Result<()> {
+    match (checkpoint, session) {
+        (Some(_), Some(_)) => {
+            anyhow::bail!("pass either --checkpoint or --session, not both")
+        }
+        (Some(checkpoint), None) => replay_checkpoint_command(checkpoint).await,
+        (None, Some(agent_id)) => replay_session_command(agent_id, config_path).await,
+        (None, None) => anyhow::bail!(
+            "pass --checkpoint <id> to inspect local state, or --session <agent_id> to re-execute a recorded session deterministically"
+        ),
+    }
+}
+
+fn load_runtime_config_or_default(runtime_config_path: &str) -> anyhow::Result<RuntimeConfig> {
+    if std::path::Path::new(runtime_config_path).exists() {
+        RuntimeConfig::from_file(runtime_config_path)
+            .map_err(|e| anyhow::anyhow!("failed to parse runtime config: {e}"))
+    } else {
+        let mut cfg = RuntimeConfig::default();
+        cfg.apply_env_overrides();
+        Ok(cfg)
+    }
+}
+
+/// Re-execute a recorded session deterministically: every LLM response is
+/// served from the journal, so no API key or network access is required.
+async fn replay_session_command(agent_id: &str, config_path: &str) -> anyhow::Result<()> {
+    let runtime_config = load_runtime_config_or_default(config_path)?;
+    let persistence = Persistence::new(&runtime_config.data_dir);
+    let session = persistence
+        .load_journal(agent_id)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    print_section("Deterministic session replay");
+    print_kv("agent", &session.agent_id);
+    print_kv("recorded", format_timestamp_ms(session.recorded_at_ms));
+    print_kv(
+        "model",
+        if session.model.is_empty() {
+            "(unknown)"
+        } else {
+            &session.model
+        },
+    );
+    print_kv("exchanges", session.exchanges.len());
+    print_kv("input", &session.user_input);
+    println!();
+
+    let system = Arc::new(AgentOSSystem::with_config(runtime_config));
+    // Run on a tokio task: the composed replay future is too large for the
+    // 1 MB main-thread stack on Windows; task futures live on the heap.
+    let (step, drifts) = {
+        let system = Arc::clone(&system);
+        let session = session.clone();
+        tokio::spawn(async move { system.replay_agent_session(&session).await })
+            .await
+            .map_err(|e| anyhow::anyhow!("replay task failed: {e}"))?
+            .map_err(|e| anyhow::anyhow!("replay failed: {e}"))?
+    };
+
+    print_section("Replayed exchanges");
+    print_table_header(&[
+        ("N", 4),
+        ("CHECKPOINT", 38),
+        ("FINISH", 12),
+        ("CONTENT", 44),
+    ]);
+    for (index, exchange) in step.exchanges.iter().enumerate() {
+        println!(
+            "{} {} {} {}",
+            table_cell(&(index + 1).to_string(), 4),
+            table_cell(&short_checkpoint(&exchange.checkpoint_id), 38),
+            table_cell(&exchange.response.finish_reason, 12),
+            table_cell(&exchange.response.content, 44)
+        );
+    }
+
+    if !step.tool_invocations.is_empty() {
+        println!();
+        print_section("Tool invocations");
+        for invocation in &step.tool_invocations {
+            println!(
+                "  {} [{}] {}",
+                invocation.name,
+                if invocation.success { "ok" } else { "err" },
+                invocation.output
+            );
+        }
+    }
+
+    println!();
+    print_kv("replayed as", &step.agent_id);
+    print_kv("rounds", step.rounds);
+    print_kv("result", &step.content);
+    println!();
+
+    if drifts.is_empty() {
+        print_success("Replay is deterministic: no drift against the recording.");
+    } else {
+        println!("drift detected ({} finding(s)):", drifts.len());
+        for drift in &drifts {
+            println!("  - {}", drift.detail);
+        }
+    }
+
+    system.shutdown_all().await;
+    Ok(())
+}
+
+async fn replay_checkpoint_command(checkpoint: &str) -> anyhow::Result<()> {
     let checkpoint = checkpoint.trim();
     if checkpoint.is_empty() {
         anyhow::bail!("missing checkpoint id; pass --checkpoint <checkpoint_id>");
@@ -2065,11 +2182,140 @@ pub async fn replay_command(checkpoint: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn fork_command(from: &str, prompt: Option<&str>) -> anyhow::Result<()> {
-    let prompt_msg = prompt.unwrap_or("(same prompt)");
-    anyhow::bail!(
-        "trace fork is not implemented yet for checkpoint '{from}' with prompt: {prompt_msg}. Use `agentOS replay --checkpoint {from}` to inspect the checkpoint first"
-    )
+/// Fork a recorded session: the selected prefix of recorded LLM exchanges
+/// replays deterministically, then the live provider continues from there.
+pub async fn fork_command(
+    from: Option<&str>,
+    session: Option<&str>,
+    at: Option<usize>,
+    prompt: Option<&str>,
+    config_path: &str,
+) -> anyhow::Result<()> {
+    let runtime_config = load_runtime_config_or_default(config_path)?;
+    let persistence = Persistence::new(&runtime_config.data_dir);
+
+    let (session, prefix_len) = match (session, from) {
+        (Some(agent_id), maybe_from) => {
+            let loaded = persistence
+                .load_journal(agent_id)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let prefix = if let Some(from) = maybe_from {
+                exchange_index_for_checkpoint(&loaded, from)? + 1
+            } else if let Some(at) = at {
+                at
+            } else {
+                loaded.exchanges.len()
+            };
+            (loaded, prefix)
+        }
+        (None, Some(from)) => {
+            let mut found = None;
+            for journal_id in persistence
+                .list_journals()
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+            {
+                if let Ok(candidate) = persistence.load_journal(&journal_id).await {
+                    if let Ok(index) = exchange_index_for_checkpoint(&candidate, from) {
+                        found = Some((candidate, index + 1));
+                        break;
+                    }
+                }
+            }
+            found.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "checkpoint '{from}' not found in any recorded session; run `agentOS replay --session <agent_id>` to list exchange checkpoints"
+                )
+            })?
+        }
+        (None, None) => anyhow::bail!(
+            "pass --session <agent_id> (optionally with --at/--from), or --from <checkpoint>"
+        ),
+    };
+    let prefix_len = prefix_len.min(session.exchanges.len());
+
+    print_section("Fork recorded session");
+    print_kv("source agent", &session.agent_id);
+    print_kv(
+        "replay prefix",
+        format!("{prefix_len}/{} exchanges", session.exchanges.len()),
+    );
+    print_kv("input", prompt.unwrap_or(&session.user_input));
+
+    let system = Arc::new(AgentOSSystem::with_config(runtime_config));
+    if !system.has_llm_provider().await {
+        println!();
+        println!(
+            "note: no live LLM provider configured; the fork can only run the recorded prefix"
+        );
+    }
+    println!();
+
+    // Same heap-boxing rationale as replay: keep the large execution
+    // future off the main-thread stack.
+    let result = {
+        let task_system = Arc::clone(&system);
+        let session = session.clone();
+        let prompt = prompt.map(|p| p.to_string());
+        match tokio::spawn(async move {
+            task_system
+                .fork_agent_session(&session, prefix_len, prompt)
+                .await
+        })
+        .await
+        {
+            Ok(inner) => inner,
+            Err(e) => {
+                system.shutdown_all().await;
+                anyhow::bail!("fork task failed: {e}");
+            }
+        }
+    };
+    let outcome = match result {
+        Ok(step) => {
+            print_kv("forked as", &step.agent_id);
+            print_kv("rounds", step.rounds);
+            print_kv("finish", &step.finish_reason);
+            print_kv("result", &step.content);
+            if !step.tool_invocations.is_empty() {
+                println!();
+                print_section("Tool invocations");
+                for invocation in &step.tool_invocations {
+                    println!(
+                        "  {} [{}] {}",
+                        invocation.name,
+                        if invocation.success { "ok" } else { "err" },
+                        invocation.output
+                    );
+                }
+            }
+            println!();
+            print_success(
+                "Fork complete. The forked run is journaled and can itself be replayed or forked.",
+            );
+            Ok(())
+        }
+        Err(e) => Err(anyhow::anyhow!("fork failed: {e}")),
+    };
+    system.shutdown_all().await;
+    outcome
+}
+
+fn exchange_index_for_checkpoint(
+    session: &RecordedSession,
+    checkpoint: &str,
+) -> anyhow::Result<usize> {
+    session
+        .exchanges
+        .iter()
+        .position(|exchange| exchange.checkpoint_id == checkpoint)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "checkpoint '{checkpoint}' is not an exchange checkpoint of session '{}'",
+                session.agent_id
+            )
+        })
 }
 
 enum LifecycleExit {

@@ -146,8 +146,27 @@ async fn main() -> anyhow::Result<()> {
         },
         Commands::Logs { id } => run::logs_command(&id).await,
         Commands::Trace { id } => run::trace_command(&id).await,
-        Commands::Replay { checkpoint } => run::replay_command(&checkpoint).await,
-        Commands::Fork { from, prompt } => run::fork_command(&from, prompt.as_deref()).await,
+        Commands::Replay {
+            checkpoint,
+            session,
+            config,
+        } => run::replay_command(checkpoint.as_deref(), session.as_deref(), &config).await,
+        Commands::Fork {
+            from,
+            session,
+            at,
+            prompt,
+            config,
+        } => {
+            run::fork_command(
+                from.as_deref(),
+                session.as_deref(),
+                at,
+                prompt.as_deref(),
+                &config,
+            )
+            .await
+        }
         Commands::Marketplace { command } => match command {
             MarketplaceCommand::Install { name, path } => {
                 marketplace::marketplace_install_command(&name, &path).await

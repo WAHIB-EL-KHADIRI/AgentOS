@@ -24,8 +24,11 @@ agentOS trace --id agent_123
 agentOS replay --checkpoint ckpt_456
 ```
 
-`agentOS fork` is currently a placeholder command that reports "not implemented
-yet". The working local workflow is `run -> trace -> replay`.
+Execution sessions are journaled automatically: `agentOS replay --session
+<agent_id>` re-executes a recorded session deterministically (recorded LLM
+responses, no API key) and reports drift, and `agentOS fork` replays a chosen
+prefix before continuing with the live provider. The working local workflow is
+`run -> trace -> replay -> fork`.
 
 ## Design Goal
 

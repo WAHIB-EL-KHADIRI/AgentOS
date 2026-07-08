@@ -5,7 +5,8 @@ use std::sync::Arc;
 use agentos_bus::InMemoryBus;
 use agentos_llm::{
     anthropic::AnthropicProvider, ollama::OllamaProvider, openai::OpenAIProvider,
-    ChatCompletionRequest, LLMProvider, Message, ToolCall, ToolDefinition,
+    ChatCompletionRequest, LLMProvider, Message, RecordedResponse, ReplayProvider, ToolCall,
+    ToolDefinition,
 };
 use agentos_memory::{Embedder, HashingEmbedder, InMemoryStore, MemoryRecord, MemoryStore};
 use agentos_registry::{Registry, ServiceDescriptor};
@@ -17,6 +18,9 @@ use crate::agent::AgentSpec;
 use crate::error::AgentError;
 use crate::events::{EventBus, SystemEventType};
 use crate::handle::AgentHandle;
+use crate::journal::{
+    self, RecordedExchange, RecordedSession, RecordedToolInvocation, ReplayDrift,
+};
 use crate::persistence::Persistence;
 use crate::plugins::AgentHooks;
 use crate::runtime_config::RuntimeConfig;
@@ -54,6 +58,8 @@ pub struct AgentExecutionStep {
     pub tool_call_count: usize,
     pub tool_invocations: Vec<ToolInvocationRecord>,
     pub rounds: usize,
+    /// The raw LLM exchanges of this step, journaled for replay and fork.
+    pub exchanges: Vec<RecordedExchange>,
 }
 
 /// One executed tool call inside an agent execution step.
@@ -208,6 +214,13 @@ impl AgentOSSystem {
         self.llm_provider.read().await.is_some()
     }
 
+    /// Remove any configured LLM provider (tests, or forcing replay-only
+    /// behavior regardless of environment variables).
+    pub async fn clear_llm_provider(&self) {
+        let mut configured = self.llm_provider.write().await;
+        *configured = None;
+    }
+
     /// Register a runtime tool for an agent so the execution loop can
     /// invoke it when the LLM requests it.
     pub async fn register_tool(&self, agent_id: &str, tool: Arc<dyn RuntimeTool>) {
@@ -220,6 +233,25 @@ impl AgentOSSystem {
         agent_id: &str,
         user_input: impl Into<String>,
     ) -> AgentResult<AgentExecutionStep> {
+        let provider = self
+            .llm_provider
+            .read()
+            .await
+            .clone()
+            .ok_or_else(|| AgentError::ConfigError("LLM provider is not configured".into()))?;
+        self.run_agent_once_with_provider(agent_id, user_input, provider)
+            .await
+    }
+
+    /// Run one execution step with an explicit provider. This is the core
+    /// loop used by live runs (system provider), deterministic replay
+    /// (`ReplayProvider`), and forks (`ReplayProvider` with live fallback).
+    pub async fn run_agent_once_with_provider(
+        &self,
+        agent_id: &str,
+        user_input: impl Into<String>,
+        provider: Arc<dyn LLMProvider>,
+    ) -> AgentResult<AgentExecutionStep> {
         let handle = self
             .supervisor
             .get(agent_id)
@@ -230,13 +262,6 @@ impl AgentOSSystem {
             return Err(AgentError::NotRunning(agent_id.to_string()));
         }
 
-        let provider = self
-            .llm_provider
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| AgentError::ConfigError("LLM provider is not configured".into()))?;
-
         let spec = handle.spec().clone();
         let system_prompt = if spec.prompt.trim().is_empty() {
             "You are a careful AgentOS agent.".to_string()
@@ -244,8 +269,10 @@ impl AgentOSSystem {
             spec.prompt.clone()
         };
         let user_input = user_input.into();
+        let user_input_text = user_input.clone();
         let provider_name = provider.name().to_string();
         let model = provider.model().to_string();
+        let request_model = model.clone();
 
         let prompt_checkpoint_id = self
             .record_thought(agent_id, &format!("prompt: {user_input}"))
@@ -265,12 +292,14 @@ impl AgentOSSystem {
 
         let mut messages = vec![Message::system(system_prompt), Message::user(user_input)];
         let mut tool_invocations: Vec<ToolInvocationRecord> = Vec::new();
+        let mut exchanges: Vec<RecordedExchange> = Vec::new();
         let mut rounds = 0usize;
 
         loop {
             rounds += 1;
             let mut request = ChatCompletionRequest::new(model.clone(), messages.clone());
             request.tools = tool_definitions.clone();
+            let request_fingerprint = journal::request_fingerprint(&request);
 
             let response = provider
                 .chat(request)
@@ -285,7 +314,13 @@ impl AgentOSSystem {
                     .await;
                 self.log_event(agent_id, "llm_response", &content).await;
 
-                return Ok(AgentExecutionStep {
+                exchanges.push(RecordedExchange {
+                    request_fingerprint,
+                    checkpoint_id: response_checkpoint_id.clone(),
+                    response: RecordedResponse::from_response(&response),
+                });
+
+                let step = AgentExecutionStep {
                     agent_id: agent_id.to_string(),
                     provider: provider_name,
                     model: if response.model.is_empty() {
@@ -300,7 +335,11 @@ impl AgentOSSystem {
                     tool_call_count: tool_invocations.len(),
                     tool_invocations,
                     rounds,
-                });
+                    exchanges,
+                };
+                self.journal_step(&spec, &user_input_text, &request_model, &step)
+                    .await;
+                return Ok(step);
             }
 
             // Tool round: execute every requested call and record each step.
@@ -309,6 +348,7 @@ impl AgentOSSystem {
                     .await;
             }
 
+            let round_start = tool_invocations.len();
             let mut result_lines = Vec::new();
             for call in &response.tool_calls {
                 let record = self.execute_tool_call(agent_id, call).await;
@@ -324,6 +364,16 @@ impl AgentOSSystem {
                 tool_invocations.push(record);
             }
 
+            // Anchor this exchange on the first tool result of the round.
+            exchanges.push(RecordedExchange {
+                request_fingerprint,
+                checkpoint_id: tool_invocations
+                    .get(round_start)
+                    .map(|r| r.checkpoint_id.clone())
+                    .unwrap_or_default(),
+                response: RecordedResponse::from_response(&response),
+            });
+
             if rounds >= MAX_TOOL_ROUNDS {
                 let content =
                     format!("tool round limit ({MAX_TOOL_ROUNDS}) reached before a final answer");
@@ -332,7 +382,7 @@ impl AgentOSSystem {
                     .await;
                 self.log_event(agent_id, "llm_response", &content).await;
 
-                return Ok(AgentExecutionStep {
+                let step = AgentExecutionStep {
                     agent_id: agent_id.to_string(),
                     provider: provider_name,
                     model,
@@ -343,7 +393,11 @@ impl AgentOSSystem {
                     tool_call_count: tool_invocations.len(),
                     tool_invocations,
                     rounds,
-                });
+                    exchanges,
+                };
+                self.journal_step(&spec, &user_input_text, &request_model, &step)
+                    .await;
+                return Ok(step);
             }
 
             // Provider-agnostic continuation: tool results go back as a user
@@ -370,6 +424,119 @@ impl AgentOSSystem {
                 result_lines.join("\n")
             )));
         }
+    }
+
+    /// Journal an execution step so it can be replayed or forked later.
+    /// Journaling failures are logged, never fatal to the run.
+    async fn journal_step(
+        &self,
+        spec: &AgentSpec,
+        user_input: &str,
+        request_model: &str,
+        step: &AgentExecutionStep,
+    ) {
+        if self.config.data_dir.trim().is_empty() {
+            return;
+        }
+        let session = RecordedSession {
+            agent_id: step.agent_id.clone(),
+            agent_name: spec.name.clone(),
+            prompt: spec.prompt.clone(),
+            capabilities: spec.capabilities.clone(),
+            model: request_model.to_string(),
+            user_input: user_input.to_string(),
+            exchanges: step.exchanges.clone(),
+            tool_invocations: step
+                .tool_invocations
+                .iter()
+                .map(RecordedToolInvocation::from_record)
+                .collect(),
+            recorded_at_ms: chrono::Utc::now().timestamp_millis() as u64,
+        };
+        let persistence = Persistence::new(&self.config.data_dir);
+        if let Err(error) = persistence.save_journal(&session).await {
+            tracing::warn!(agent_id = %step.agent_id, %error, "failed to journal execution step");
+        }
+    }
+
+    /// Re-execute a recorded session deterministically: every LLM response
+    /// is served from the recording (no API key, no network). Returns the
+    /// replayed step plus any drift between recording and replay.
+    pub async fn replay_agent_session(
+        &self,
+        session: &RecordedSession,
+    ) -> AgentResult<(AgentExecutionStep, Vec<ReplayDrift>)> {
+        let replay_id = format!(
+            "{}_replay_{}",
+            session.agent_id,
+            chrono::Utc::now().timestamp_millis()
+        );
+        let step = self
+            .run_recorded_session(session, &replay_id, session.exchanges.len(), None, false)
+            .await?;
+        let drifts = journal::compare_replay(session, &step.exchanges, &step.tool_invocations);
+        Ok((step, drifts))
+    }
+
+    /// Fork a recorded session: replay the first `prefix_len` exchanges
+    /// deterministically, then continue with the live provider (when one is
+    /// configured). `new_input` optionally replaces the recorded user input
+    /// to explore "what would the agent have done differently".
+    pub async fn fork_agent_session(
+        &self,
+        session: &RecordedSession,
+        prefix_len: usize,
+        new_input: Option<String>,
+    ) -> AgentResult<AgentExecutionStep> {
+        let fork_id = format!(
+            "{}_fork_{}",
+            session.agent_id,
+            chrono::Utc::now().timestamp_millis()
+        );
+        let prefix = prefix_len.min(session.exchanges.len());
+        self.run_recorded_session(session, &fork_id, prefix, new_input, true)
+            .await
+    }
+
+    async fn run_recorded_session(
+        &self,
+        session: &RecordedSession,
+        new_agent_id: &str,
+        prefix_len: usize,
+        new_input: Option<String>,
+        live_fallback: bool,
+    ) -> AgentResult<AgentExecutionStep> {
+        let mut spec = AgentSpec::new(new_agent_id, session.agent_name.clone());
+        spec.prompt = session.prompt.clone();
+        spec.capabilities = session.capabilities.clone();
+        self.spawn_agent(spec).await?;
+
+        // Carry over the original agent's tools when they are registered in
+        // this process, so replayed tool calls execute the same code. When
+        // they are not (fresh process), drift detection reports it honestly.
+        for tool in self.tool_registry.tools_for(&session.agent_id).await {
+            self.tool_registry.register(new_agent_id, tool).await;
+        }
+
+        let responses: Vec<RecordedResponse> = session.exchanges[..prefix_len]
+            .iter()
+            .map(|exchange| exchange.response.clone())
+            .collect();
+        let mut provider = ReplayProvider::new(responses).with_model(session.model.clone());
+        if live_fallback {
+            if let Some(live) = self.llm_provider.read().await.clone() {
+                provider = provider.with_fallback(live);
+            }
+        }
+
+        let input = new_input.unwrap_or_else(|| session.user_input.clone());
+        // Boxed: the execution-loop future is large, and callers may already
+        // be deeply nested (replay of a fork of a replay).
+        let result =
+            Box::pin(self.run_agent_once_with_provider(new_agent_id, input, Arc::new(provider)))
+                .await;
+        let _ = self.supervisor.stop(new_agent_id).await;
+        result
     }
 
     /// Execute one LLM tool call against the registry, recording checkpoints,
@@ -842,9 +1009,20 @@ mod tests {
         }
     }
 
+    /// System with an isolated temp data_dir so auto-journaling never
+    /// writes into the repository during tests.
+    fn system_with_temp_data(name: &str) -> (AgentOSSystem, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("agentos_sys_{name}_{}", uuid::Uuid::new_v4()));
+        let config = RuntimeConfig {
+            data_dir: dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+        (AgentOSSystem::with_config(config), dir)
+    }
+
     #[tokio::test]
     async fn test_run_agent_once_executes_registered_tool() {
-        let system = AgentOSSystem::new();
+        let (system, dir) = system_with_temp_data("tool");
         system
             .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
                 tool_call_response("uppercase", serde_json::json!({"text": "hi"})),
@@ -888,12 +1066,22 @@ mod tests {
             .iter()
             .any(|e| e.event_type == SystemEventType::Custom("tool_result".into())));
 
+        // The step was auto-journaled with its exchanges.
+        let journal = Persistence::new(&dir)
+            .load_journal("tool-test")
+            .await
+            .unwrap();
+        assert_eq!(journal.exchanges.len(), 2);
+        assert_eq!(journal.tool_invocations.len(), 1);
+        assert_eq!(journal.user_input, "please uppercase");
+
         system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn test_run_agent_once_unknown_tool_records_error() {
-        let system = AgentOSSystem::new();
+        let (system, dir) = system_with_temp_data("unknown");
         system
             .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
                 tool_call_response("missing_tool", serde_json::json!({})),
@@ -919,6 +1107,7 @@ mod tests {
         assert!(logs.iter().any(|e| e.event_type == "tool_error"));
 
         system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -927,7 +1116,7 @@ mod tests {
             .map(|_| tool_call_response("uppercase", serde_json::json!({"text": "loop"})))
             .collect::<Vec<_>>();
 
-        let system = AgentOSSystem::new();
+        let (system, dir) = system_with_temp_data("cap");
         system
             .set_llm_provider(Arc::new(ScriptedProvider::new(responses)))
             .await;
@@ -947,6 +1136,191 @@ mod tests {
         assert!(step.tool_invocations.iter().all(|t| t.success));
 
         system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_replay_session_is_deterministic_with_no_drift() {
+        let (system, dir) = system_with_temp_data("replay");
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
+                tool_call_response("uppercase", serde_json::json!({"text": "hi"})),
+                final_response("done: HI"),
+            ])))
+            .await;
+        system
+            .register_tool("rp-src", Arc::new(UppercaseTool))
+            .await;
+        system
+            .spawn_agent(AgentSpec::new("rp-src", "Replay Source"))
+            .await
+            .unwrap();
+
+        let original = system
+            .run_agent_once("rp-src", "please uppercase")
+            .await
+            .unwrap();
+        assert_eq!(original.exchanges.len(), 2);
+
+        // The auto-journaled session replays with no live provider at all.
+        system.clear_llm_provider().await;
+        let session = Persistence::new(&dir).load_journal("rp-src").await.unwrap();
+        let (replayed, drifts) = system.replay_agent_session(&session).await.unwrap();
+
+        assert!(drifts.is_empty(), "unexpected drift: {drifts:?}");
+        assert_eq!(replayed.content, original.content);
+        assert_eq!(replayed.rounds, original.rounds);
+        assert_eq!(replayed.provider, "replay");
+        assert!(replayed.agent_id.starts_with("rp-src_replay_"));
+        assert_eq!(
+            replayed.exchanges[0].request_fingerprint,
+            original.exchanges[0].request_fingerprint
+        );
+        assert_eq!(replayed.tool_invocations[0].output, "HI");
+
+        system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_replay_detects_tool_drift() {
+        struct LowercaseTool;
+
+        #[async_trait::async_trait]
+        impl RuntimeTool for LowercaseTool {
+            fn name(&self) -> &str {
+                "uppercase"
+            }
+            fn description(&self) -> &str {
+                "Pretends to uppercase but lowercases"
+            }
+            async fn invoke(&self, arguments: &serde_json::Value) -> Result<String, String> {
+                arguments
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|t| t.to_lowercase())
+                    .ok_or_else(|| "missing 'text' argument".to_string())
+            }
+        }
+
+        let (system, dir) = system_with_temp_data("drift");
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
+                tool_call_response("uppercase", serde_json::json!({"text": "Hi"})),
+                final_response("done"),
+            ])))
+            .await;
+        system
+            .register_tool("drift-src", Arc::new(UppercaseTool))
+            .await;
+        system
+            .spawn_agent(AgentSpec::new("drift-src", "Drift Source"))
+            .await
+            .unwrap();
+        system.run_agent_once("drift-src", "go").await.unwrap();
+
+        // The tool implementation changed between recording and replay.
+        system
+            .register_tool("drift-src", Arc::new(LowercaseTool))
+            .await;
+        system.clear_llm_provider().await;
+
+        let session = Persistence::new(&dir)
+            .load_journal("drift-src")
+            .await
+            .unwrap();
+        let (_, drifts) = system.replay_agent_session(&session).await.unwrap();
+
+        assert!(
+            drifts.iter().any(|d| d.kind == journal::DriftKind::Tool),
+            "expected tool drift, got: {drifts:?}"
+        );
+
+        system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_fork_replays_prefix_then_continues_live() {
+        let (system, dir) = system_with_temp_data("fork");
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
+                tool_call_response("uppercase", serde_json::json!({"text": "hi"})),
+                final_response("original ending"),
+            ])))
+            .await;
+        system
+            .register_tool("fork-src", Arc::new(UppercaseTool))
+            .await;
+        system
+            .spawn_agent(AgentSpec::new("fork-src", "Fork Source"))
+            .await
+            .unwrap();
+        let original = system.run_agent_once("fork-src", "go").await.unwrap();
+        assert_eq!(original.content, "original ending");
+
+        // Fork after the first exchange; the live provider now answers
+        // differently, so the fork diverges from the recording.
+        let session = Persistence::new(&dir)
+            .load_journal("fork-src")
+            .await
+            .unwrap();
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(vec![final_response(
+                "forked ending",
+            )])))
+            .await;
+
+        let fork = system.fork_agent_session(&session, 1, None).await.unwrap();
+
+        assert!(fork.agent_id.starts_with("fork-src_fork_"));
+        assert_eq!(fork.rounds, 2);
+        assert_eq!(fork.content, "forked ending");
+        // The replayed prefix stayed identical to the recording.
+        assert_eq!(
+            fork.exchanges[0].request_fingerprint,
+            session.exchanges[0].request_fingerprint
+        );
+        assert_eq!(fork.tool_invocations.len(), 1);
+        assert_eq!(fork.tool_invocations[0].output, "HI");
+
+        system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_fork_without_live_provider_fails_cleanly_past_prefix() {
+        let (system, dir) = system_with_temp_data("fork_nolive");
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
+                tool_call_response("uppercase", serde_json::json!({"text": "hi"})),
+                final_response("original ending"),
+            ])))
+            .await;
+        system
+            .register_tool("nolive-src", Arc::new(UppercaseTool))
+            .await;
+        system
+            .spawn_agent(AgentSpec::new("nolive-src", "No Live Source"))
+            .await
+            .unwrap();
+        system.run_agent_once("nolive-src", "go").await.unwrap();
+
+        let session = Persistence::new(&dir)
+            .load_journal("nolive-src")
+            .await
+            .unwrap();
+        system.clear_llm_provider().await;
+
+        let result = system.fork_agent_session(&session, 1, None).await;
+        let error = result.expect_err("fork past the prefix must fail without a live provider");
+        assert!(
+            error.to_string().contains("exhausted"),
+            "unexpected error: {error}"
+        );
+
+        system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -1024,7 +1398,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_system_run_agent_once_calls_llm_and_records_trace() {
-        let system = AgentOSSystem::new();
+        let (system, dir) = system_with_temp_data("echo");
         system.set_llm_provider(Arc::new(EchoProvider)).await;
 
         let mut spec = AgentSpec::new("llm-test", "LLM Test");
@@ -1046,6 +1420,7 @@ mod tests {
         assert!(logs.iter().any(|entry| entry.event_type == "llm_response"));
 
         system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

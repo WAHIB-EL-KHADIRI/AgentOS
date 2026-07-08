@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use agentos_trace::RecordedThought;
 use agentos_vault::{Vault, VaultEncryption};
 use serde::{Deserialize, Serialize};
+
+use crate::journal::RecordedSession;
 use tokio::io::AsyncWriteExt;
 
 use crate::error::{AgentError, AgentResult};
@@ -46,6 +48,9 @@ impl Persistence {
         tokio::fs::create_dir_all(self.data_dir.join("vault"))
             .await
             .map_err(|e| AgentError::Internal(format!("cannot create vault dir: {e}")))?;
+        tokio::fs::create_dir_all(self.data_dir.join("journals"))
+            .await
+            .map_err(|e| AgentError::Internal(format!("cannot create journals dir: {e}")))?;
         Ok(())
     }
 
@@ -141,6 +146,68 @@ impl Persistence {
         Ok(vault)
     }
 
+    fn journal_path(&self, agent_id: &str) -> PathBuf {
+        self.data_dir
+            .join("journals")
+            .join(format!("{}.json", sanitize_file_id(agent_id)))
+    }
+
+    /// Persist a recorded execution session (LLM exchanges + tool results).
+    pub async fn save_journal(&self, session: &RecordedSession) -> AgentResult<()> {
+        let json = serde_json::to_string_pretty(session)
+            .map_err(|e| AgentError::Internal(format!("journal serialization error: {e}")))?;
+
+        let path = self.journal_path(&session.agent_id);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| AgentError::Internal(format!("cannot create journals dir: {e}")))?;
+        }
+
+        tokio::fs::write(&path, json.as_bytes())
+            .await
+            .map_err(|e| AgentError::Internal(format!("cannot write journal: {e}")))?;
+        Ok(())
+    }
+
+    /// Load the recorded session for an agent, if one was journaled.
+    pub async fn load_journal(&self, agent_id: &str) -> AgentResult<RecordedSession> {
+        let path = self.journal_path(agent_id);
+        let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
+            AgentError::Internal(format!(
+                "no recorded session for '{agent_id}' at {}: {e}",
+                path.display()
+            ))
+        })?;
+        serde_json::from_str(&content)
+            .map_err(|e| AgentError::Internal(format!("cannot parse journal: {e}")))
+    }
+
+    pub async fn list_journals(&self) -> AgentResult<Vec<String>> {
+        let dir = self.data_dir.join("journals");
+        if !tokio::fs::try_exists(&dir).await.unwrap_or(false) {
+            return Ok(Vec::new());
+        }
+        let mut entries = tokio::fs::read_dir(&dir)
+            .await
+            .map_err(|e| AgentError::Internal(format!("cannot read journals dir: {e}")))?;
+
+        let mut journals = Vec::new();
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| AgentError::Internal(format!("cannot read entry: {e}")))?
+        {
+            if let Some(name) = entry.file_name().to_str() {
+                if let Some(stem) = name.strip_suffix(".json") {
+                    journals.push(stem.to_string());
+                }
+            }
+        }
+        journals.sort();
+        Ok(journals)
+    }
+
     pub async fn list_traces(&self) -> AgentResult<Vec<String>> {
         let mut dir = tokio::fs::read_dir(self.data_dir.join("traces"))
             .await
@@ -161,6 +228,19 @@ impl Persistence {
 
         Ok(traces)
     }
+}
+
+/// Keep journal filenames safe regardless of agent id contents.
+fn sanitize_file_id(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

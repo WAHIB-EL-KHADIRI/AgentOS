@@ -23,6 +23,8 @@ agentos-memory = { path = "../memory" }
 agentos-vault = { path = "../vault" }
 agentos-registry = { path = "../registry" }
 agentos-llm = { path = "../llm" }
+sha2.workspace = true
+hex.workspace = true
 
 hyper.workspace = true
 async-trait.workspace = true

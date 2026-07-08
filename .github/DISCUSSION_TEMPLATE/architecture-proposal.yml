@@ -1,5 +1,6 @@
-title: "Architecture proposal: "
-labels: ["architecture"]
+title: 'Architecture proposal: '
+labels:
+  - architecture
 body:
   - type: textarea
     id: problem
@@ -20,4 +21,3 @@ body:
     attributes:
       label: Affected crates
       description: Which crates or docs would change?
-

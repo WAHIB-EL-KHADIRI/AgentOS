@@ -119,13 +119,15 @@ Experimental:
   when the model requests them, with every call and result recorded as
   trace checkpoints, logs, and live dashboard events (capped rounds,
   provider-agnostic result passing).
+- Deterministic session replay and fork: every execution step is journaled
+  (LLM exchanges + tool results); `agentOS replay --session <agent_id>`
+  re-executes it with recorded responses (no API key needed) and reports
+  drift, and `agentOS fork` replays a prefix then continues live.
 - Python and TypeScript SDK packaging.
 - Marketplace commands and plugin distribution ideas.
 
 Planned or still being hardened:
 
-- Trace fork and branch workflows. `agentOS fork` currently reports that trace
-  forking is not implemented yet.
 - Stronger restart and recovery guarantees with explicit tests.
 - More complete dashboard time-travel views.
 - Published SDK packages.
