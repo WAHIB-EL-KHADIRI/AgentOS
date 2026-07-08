@@ -1,6 +1,6 @@
 # AgentOS - Runtime Infrastructure for AI Agents
 
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.94%2B-orange)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)
 [![CI](https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml/badge.svg)](https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml)
 [![Windows](https://img.shields.io/badge/windows-supported-blue)](scripts/check.ps1)
@@ -17,7 +17,24 @@ Most agent frameworks help you build an agent workflow. AgentOS focuses on what
 happens after that workflow needs to run as a long-lived process, fail clearly,
 restart carefully, and be inspected after the fact.
 
-Created and led by **WAHIB EL KHADIRI**.
+## Time-Travel Debugging
+
+Your agent did something weird on step 7. Reproducing it costs real API calls —
+and never behaves the same twice. AgentOS journals every LLM exchange and tool
+result at the provider boundary, so any run can be replayed deterministically
+and forked into alternate timelines:
+
+```bash
+agentOS run --agent my_agent.toml      # every execution step is journaled automatically
+agentOS replay --session agent_123    # re-run offline: no API key, no cost, drift-checked
+agentOS fork --from ckpt_4 --prompt "try the other path"   # branch from any checkpoint
+```
+
+<!-- TODO(launch): demo GIF of the dashboard Recordings scrubber goes here -->
+
+The dashboard's **Recordings** view turns journals into a scrubbable timeline:
+step through the prompt, every exchange, tool calls and their results exactly
+as they happened, with per-exchange checkpoints as fork anchors.
 
 ## What AgentOS Is
 
@@ -69,32 +86,9 @@ cargo build --workspace
 cargo run -p agentos-cli -- run --agent examples/simple_agent.toml
 ```
 
-Install scripts are available for tagged releases. For the first public alpha,
-pin the alpha tag explicitly:
-
-```bash
-# Linux / macOS
-export AGENTOS_VERSION=v0.1.0-alpha
-curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/agentOS/main/install.sh | bash
-
-# Windows PowerShell
-$env:AGENTOS_VERSION = "v0.1.0-alpha"
-iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/agentOS/main/install.ps1 | iex
-```
-
-After stable releases exist, the install scripts can resolve the latest GitHub
-release automatically. During alpha, source builds remain the most reliable
-path for contributors.
-
-Run the repository check before opening a PR:
-
-```bash
-# Linux / macOS
-bash scripts/check.sh
-
-# Windows PowerShell
-powershell -File scripts/check.ps1
-```
+One-liner install scripts ([`install.sh`](install.sh), [`install.ps1`](install.ps1))
+activate with the first tagged release. Until then, building from source is the
+supported path.
 
 ## Current Status
 
@@ -125,13 +119,16 @@ Experimental:
   (LLM exchanges + tool results); `agentOS replay --session <agent_id>`
   re-executes it with recorded responses (no API key needed) and reports
   drift, and `agentOS fork` replays a prefix then continues live.
+- Dashboard Recordings view: a time-travel scrubber over recorded sessions
+  (slider and step controls across the prompt, exchanges, tool calls and
+  results, with per-exchange checkpoints shown as fork anchors).
 - Python and TypeScript SDK packaging.
 - Marketplace commands and plugin distribution ideas.
 
 Planned or still being hardened:
 
 - Stronger restart and recovery guarantees with explicit tests.
-- More complete dashboard time-travel views.
+- Dashboard diff view between an original run and its forks.
 - Published SDK packages.
 - More integration examples for existing agent frameworks.
 
@@ -181,7 +178,8 @@ agentOS run --agent my_agent.toml
 agentOS ps
 agentOS logs --id agent_123
 agentOS trace --id agent_123
-agentOS replay --checkpoint ckpt_456
+agentOS replay --session agent_123
+agentOS fork --from ckpt_456 --prompt "explore the alternative"
 agentOS status
 agentOS doctor
 agentOS repl
