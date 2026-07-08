@@ -24,7 +24,7 @@
     "url": "https://github.com/WAHIB-EL-KHADIRI/agentOS.git"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
+    "typescript": "^6.0.3",
     "vitest": "^3.0.0"
   },
   "dependencies": {
