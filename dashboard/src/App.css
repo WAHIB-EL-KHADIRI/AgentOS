@@ -847,3 +847,322 @@ body,
     margin-left: 0;
   }
 }
+
+/* ── View tabs (Live / Recordings) ─────────────────────────────────── */
+.app__tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 3px;
+}
+
+.app__tab {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 500;
+  padding: 5px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.app__tab:hover {
+  color: var(--text-primary);
+}
+
+.app__tab--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.app__body--recordings {
+  display: block;
+  overflow: hidden;
+}
+
+/* ── Session explorer ──────────────────────────────────────────────── */
+.sessions {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sessions__list {
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  overflow-y: auto;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sessions__list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sessions__list-head h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.sessions__list-head button {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.sessions__list-head button:hover {
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
+
+.sessions__item {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  word-break: break-all;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.sessions__item:hover {
+  background: var(--bg-hover);
+}
+
+.sessions__item--selected {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.sessions__hint {
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sessions__hint--error {
+  color: var(--red);
+}
+
+.sessions__hint button {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.sessions__detail {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sessions__placeholder {
+  margin: auto;
+  text-align: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 24px;
+}
+
+.sessions__placeholder-sub {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── Time travel view ──────────────────────────────────────────────── */
+.timetravel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  outline: none;
+}
+
+.timetravel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.timetravel__header h2 {
+  font-size: 17px;
+}
+
+.timetravel__meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.timetravel__cli {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--cyan);
+  white-space: nowrap;
+}
+
+.timetravel__scrubber {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.timetravel__scrubber button {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.timetravel__scrubber button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.timetravel__scrubber input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.timetravel__position {
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.timetravel__transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.timetravel__step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 12px 16px;
+  max-width: 720px;
+}
+
+.timetravel__step--prompt {
+  border-left: 3px solid var(--blue);
+}
+
+.timetravel__step--exchange {
+  border-left: 3px solid var(--purple);
+}
+
+.timetravel__step--current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.timetravel__step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.timetravel__step-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.timetravel__finish {
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.timetravel__content {
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.timetravel__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.timetravel__tool {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.timetravel__tool-call {
+  color: var(--yellow);
+  word-break: break-all;
+}
+
+.timetravel__tool-result--ok {
+  color: var(--green);
+  word-break: break-word;
+}
+
+.timetravel__tool-result--err {
+  color: var(--red);
+  word-break: break-word;
+}
+
+.timetravel__checkpoint {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace;
+}

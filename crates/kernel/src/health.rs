@@ -123,6 +123,18 @@ impl HealthServer {
             (Method::GET, "/health/ready") => Ok(self.readiness_response().await),
             (Method::GET, "/metrics") => Ok(self.metrics_response().await),
             (Method::GET, "/api/v1/agents") => Ok(self.list_agents_response().await),
+            (Method::GET, "/api/v1/journals") => Ok(self.list_journals_response().await),
+            (Method::GET, path) if path.starts_with("/api/v1/journals/") => {
+                let agent_id = path.trim_start_matches("/api/v1/journals/");
+                if !is_valid_agent_id(agent_id) {
+                    Ok(json_response(
+                        StatusCode::BAD_REQUEST,
+                        serde_json::json!({"error":"invalid agent id"}),
+                    ))
+                } else {
+                    Ok(self.journal_response(agent_id).await)
+                }
+            }
             (Method::GET, path) if path.starts_with("/api/v1/agents/") => {
                 let agent_id = path.trim_start_matches("/api/v1/agents/");
                 if !is_valid_agent_id(agent_id) {
@@ -135,6 +147,36 @@ impl HealthServer {
                 }
             }
             _ => Ok(text_response(StatusCode::NOT_FOUND, "not found")),
+        }
+    }
+
+    /// Recorded execution sessions available for replay/fork (journal ids).
+    async fn list_journals_response(&self) -> Response<String> {
+        let persistence = crate::persistence::Persistence::new(&self.system.config.data_dir);
+        match persistence.list_journals().await {
+            Ok(journals) => json_response(StatusCode::OK, serde_json::json!(journals)),
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                serde_json::json!({"error": e.to_string()}),
+            ),
+        }
+    }
+
+    /// One recorded session, as journaled by the execution loop.
+    async fn journal_response(&self, agent_id: &str) -> Response<String> {
+        let persistence = crate::persistence::Persistence::new(&self.system.config.data_dir);
+        match persistence.load_journal(agent_id).await {
+            Ok(session) => match serde_json::to_value(&session) {
+                Ok(value) => json_response(StatusCode::OK, value),
+                Err(e) => json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    serde_json::json!({"error": e.to_string()}),
+                ),
+            },
+            Err(_) => json_response(
+                StatusCode::NOT_FOUND,
+                serde_json::json!({"error": format!("no recorded session for '{agent_id}'")}),
+            ),
         }
     }
 

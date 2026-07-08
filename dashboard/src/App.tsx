@@ -4,6 +4,9 @@ import { createSseConnection } from "./api/sse";
 import AgentList from "./components/AgentList";
 import AgentDetail from "./components/AgentDetail";
 import EventStream from "./components/EventStream";
+import SessionExplorer from "./components/SessionExplorer";
+
+type ViewTab = "live" | "recordings";
 
 const SSE_URL = "/api/events";
 const connectionLabels: Record<ConnectionState, string> = {
@@ -20,6 +23,7 @@ export default function App() {
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<ViewTab>("live");
   const connRef = useRef<ReturnType<typeof createSseConnection> | null>(null);
   const maxEvents = 500;
 
@@ -112,6 +116,23 @@ export default function App() {
           <h1>AgentOS</h1>
         </div>
 
+        <nav className="app__tabs" aria-label="Dashboard views">
+          <button
+            type="button"
+            className={`app__tab ${view === "live" ? "app__tab--active" : ""}`}
+            onClick={() => setView("live")}
+          >
+            Live
+          </button>
+          <button
+            type="button"
+            className={`app__tab ${view === "recordings" ? "app__tab--active" : ""}`}
+            onClick={() => setView("recordings")}
+          >
+            Recordings
+          </button>
+        </nav>
+
         <div className="app__header-actions">
           <span
             className={`app__connection app__connection--${connectionState}`}
@@ -133,23 +154,29 @@ export default function App() {
         </div>
       )}
 
-      <div className="app__body">
-        <aside className="app__sidebar">
-          <AgentList
-            agents={agents}
-            selectedId={selectedAgent?.id ?? null}
-            onSelect={handleSelectAgent}
-          />
-        </aside>
+      {view === "live" ? (
+        <div className="app__body">
+          <aside className="app__sidebar">
+            <AgentList
+              agents={agents}
+              selectedId={selectedAgent?.id ?? null}
+              onSelect={handleSelectAgent}
+            />
+          </aside>
 
-        <main className="app__main">
-          <AgentDetail agent={selectedAgent} trace={trace} />
-        </main>
+          <main className="app__main">
+            <AgentDetail agent={selectedAgent} trace={trace} />
+          </main>
 
-        <aside className="app__events">
-          <EventStream events={events} filterAgentId={selectedAgent?.id ?? null} />
-        </aside>
-      </div>
+          <aside className="app__events">
+            <EventStream events={events} filterAgentId={selectedAgent?.id ?? null} />
+          </aside>
+        </div>
+      ) : (
+        <div className="app__body app__body--recordings">
+          <SessionExplorer />
+        </div>
+      )}
     </div>
   );
 }

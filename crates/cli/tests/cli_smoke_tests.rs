@@ -95,7 +95,7 @@ fn marketplace_list_empty_registry_is_friendly() {
 }
 
 #[test]
-fn fork_reports_not_implemented_as_error() {
+fn fork_unknown_checkpoint_reports_clear_error() {
     let cwd = temp_dir("fork_cwd");
     let home = temp_dir("fork_home");
     std::fs::create_dir_all(&cwd).unwrap();
@@ -113,10 +113,20 @@ fn fork_reports_not_implemented_as_error() {
         &home,
     );
     let text = output_text(&output);
+
+    assert!(!output.status.success(), "{text}");
+    assert!(
+        text.contains("not found in any recorded session"),
+        "{text}"
+    );
+    assert!(text.contains("agentOS replay --session"), "{text}");
+
+    // Without any selector the command explains its usage.
+    let no_args = run_agentos(&["fork"], &cwd, &home);
+    let no_args_text = output_text(&no_args);
     let _ = std::fs::remove_dir_all(&cwd);
     let _ = std::fs::remove_dir_all(&home);
 
-    assert!(!output.status.success(), "{text}");
-    assert!(text.contains("trace fork is not implemented yet"));
-    assert!(text.contains("agentOS replay --checkpoint ckpt_test"));
+    assert!(!no_args.status.success(), "{no_args_text}");
+    assert!(no_args_text.contains("--session"), "{no_args_text}");
 }

@@ -34,6 +34,47 @@ export interface TraceStep {
   timestamp: string;
 }
 
+// ── Recorded sessions (journals) ────────────────────────────────────
+// Mirrors crates/kernel/src/journal.rs. Served by /api/v1/journals.
+
+export interface RecordedToolCall {
+  id: string;
+  name: string;
+  arguments: unknown;
+}
+
+export interface RecordedResponse {
+  model: string;
+  content: string;
+  tool_calls: RecordedToolCall[];
+  finish_reason: string;
+}
+
+export interface RecordedExchange {
+  request_fingerprint: string;
+  checkpoint_id: string;
+  response: RecordedResponse;
+}
+
+export interface RecordedToolInvocation {
+  name: string;
+  arguments: unknown;
+  success: boolean;
+  output: string;
+}
+
+export interface RecordedSession {
+  agent_id: string;
+  agent_name: string;
+  prompt: string;
+  capabilities: string[];
+  model: string;
+  user_input: string;
+  exchanges: RecordedExchange[];
+  tool_invocations: RecordedToolInvocation[];
+  recorded_at_ms: number;
+}
+
 export type SseEvent =
   | { type: "agent_started"; data: AgentInfo }
   | { type: "agent_stopped"; data: AgentStoppedPayload }

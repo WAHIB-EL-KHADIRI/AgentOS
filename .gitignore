@@ -49,3 +49,7 @@ id_ed25519
 .aws/
 .gcp/
 .azure/
+
+
+# Local cargo build configuration (machine-specific target-dir)
+.cargo/

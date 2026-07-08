@@ -180,6 +180,12 @@ fn open_runtime_serves_health_metrics_agents_and_sse() {
     assert_eq!(status_code(&agents), Some(200), "agents: {agents}");
     assert!(agents.contains("agent_e2e_agent"), "agents: {agents}");
 
+    // Recorded-session listing serves the dashboard's Recordings view.
+    // No LLM provider ran here, so the list is empty but well-formed.
+    let journals = http_get(ports.http, "/api/v1/journals", None).unwrap();
+    assert_eq!(status_code(&journals), Some(200), "journals: {journals}");
+    assert!(journals.contains("[]"), "journals: {journals}");
+
     // The SSE stream serves named dashboard events: the periodic status
     // ticker emits agent_status within ~5 seconds.
     let sse = read_sse_until(
@@ -227,6 +233,12 @@ fn token_protected_runtime_guards_every_surface() {
         status_code(&agents_unauth),
         Some(401),
         "agents: {agents_unauth}"
+    );
+    let journals_unauth = http_get(ports.http, "/api/v1/journals", None).unwrap();
+    assert_eq!(
+        status_code(&journals_unauth),
+        Some(401),
+        "journals: {journals_unauth}"
     );
 
     // The correct bearer token is accepted.
