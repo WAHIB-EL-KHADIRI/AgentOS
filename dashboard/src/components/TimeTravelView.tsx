@@ -55,12 +55,15 @@ export function buildTimeSteps(session: RecordedSession): TimeStep[] {
 export default function TimeTravelView({ session }: TimeTravelViewProps) {
   const steps = useMemo(() => buildTimeSteps(session), [session]);
   const [cursor, setCursor] = useState(steps.length - 1);
+  const [renderedSession, setRenderedSession] = useState(session.agent_id);
   const currentRef = useRef<HTMLDivElement | null>(null);
 
   // A new session selection resets the cursor to the end of the recording.
-  useEffect(() => {
+  // Render-phase reset (not an effect): the sanctioned derived-state pattern.
+  if (renderedSession !== session.agent_id) {
+    setRenderedSession(session.agent_id);
     setCursor(steps.length - 1);
-  }, [steps.length, session.agent_id]);
+  }
 
   useEffect(() => {
     // Guarded: not implemented in all environments (e.g. jsdom).
@@ -72,18 +75,10 @@ export default function TimeTravelView({ session }: TimeTravelViewProps) {
   const stepBack = () => setCursor((value) => Math.max(0, value - 1));
   const stepForward = () => setCursor((value) => Math.min(steps.length - 1, value + 1));
 
-  const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      stepBack();
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      stepForward();
-    }
-  };
-
+  // Arrow-key navigation comes from the native range input, which already
+  // maps ArrowLeft/ArrowRight to value changes when focused.
   return (
-    <div className="timetravel" onKeyDown={onKeyDown} tabIndex={0} aria-label="Time travel view">
+    <section className="timetravel" aria-label="Time travel view">
       <div className="timetravel__header">
         <div>
           <h2>{session.agent_name}</h2>
@@ -94,18 +89,11 @@ export default function TimeTravelView({ session }: TimeTravelViewProps) {
             {new Date(session.recorded_at_ms).toLocaleString()}
           </span>
         </div>
-        <code className="timetravel__cli">
-          agentOS replay --session {session.agent_id}
-        </code>
+        <code className="timetravel__cli">agentOS replay --session {session.agent_id}</code>
       </div>
 
       <div className="timetravel__scrubber" role="group" aria-label="Time travel controls">
-        <button
-          type="button"
-          onClick={stepBack}
-          disabled={cursor === 0}
-          aria-label="Previous step"
-        >
+        <button type="button" onClick={stepBack} disabled={cursor === 0} aria-label="Previous step">
           ◀
         </button>
         <input
@@ -184,6 +172,6 @@ export default function TimeTravelView({ session }: TimeTravelViewProps) {
           );
         })}
       </div>
-    </div>
+    </section>
   );
 }

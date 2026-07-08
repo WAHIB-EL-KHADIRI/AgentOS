@@ -32,9 +32,7 @@ const session: RecordedSession = {
       },
     },
   ],
-  tool_invocations: [
-    { name: "uppercase", arguments: { text: "hi" }, success: true, output: "HI" },
-  ],
+  tool_invocations: [{ name: "uppercase", arguments: { text: "hi" }, success: true, output: "HI" }],
   recorded_at_ms: 1751900000000,
 };
 
