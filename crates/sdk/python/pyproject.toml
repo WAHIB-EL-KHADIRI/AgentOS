@@ -13,7 +13,7 @@ authors = [
     { name = "WAHIB EL KHADIRI", email = "wahibmaxim@gmail.com" },
 ]
 dependencies = [
-    "httpx>=0.27",
+    "httpx>=0.28.1",
 ]
 keywords = ["ai", "agents", "runtime", "llm", "multi-agent", "agentos"]
 classifiers = [
