@@ -17,6 +17,36 @@ Most agent frameworks help you build an agent workflow. AgentOS focuses on what
 happens after that workflow needs to run as a long-lived process, fail clearly,
 restart carefully, and be inspected after the fact.
 
+## See it run
+
+Real output from a fresh clone — no API key required to bring the runtime up:
+
+```text
+$ cargo run -p agentos-cli -- run --agent examples/simple_agent.toml
+
+INFO agentos_kernel::supervisor: agent spawned and running agent_id=agent_simple_agent state=Running name=simple-agent
+INFO agentos_kernel::agent: agent loop started agent_id=agent_simple_agent
+INFO agentos_kernel::events: system event emitted event=agent.spawned seq=0
+INFO agentOS::run: AgentOS runtime started agent_id=agent_simple_agent host=127.0.0.1 http_port=8080 grpc_port=50051 sse_port=8081
+INFO agentos_kernel::health: health server listening on 127.0.0.1:8080
+INFO agentos_bus::grpc: gRPC bus server listening on 127.0.0.1:50051
+INFO agentos_bus::grpc: SSE event stream listening on http://127.0.0.1:8081/events
+
+AgentOS runtime is live
+  http:       127.0.0.1:8080
+  grpc:       127.0.0.1:50051
+  sse:        http://127.0.0.1:8081/events
+  auth:       open (set AGENTOS_API_TOKEN to protect)
+  vault:      in-memory only (set AGENTOS_VAULT_KEY to persist)
+  agent id:   agent_simple_agent
+  status:     running
+  trace:      294dab79-e626-4e42-97ad-8deee2c43e18
+  (press Ctrl+C to stop)
+```
+
+One process gives you a supervised agent, a health endpoint, a gRPC message
+bus, a live SSE event stream, and a recorded trace you can replay later.
+
 ## Time-Travel Debugging
 
 Your agent did something weird on step 7. Reproducing it costs real API calls —
