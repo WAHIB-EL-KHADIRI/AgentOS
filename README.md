@@ -116,9 +116,21 @@ cargo build --workspace
 cargo run -p agentos-cli -- run --agent examples/simple_agent.toml
 ```
 
-One-liner install scripts ([`install.sh`](install.sh), [`install.ps1`](install.ps1))
-activate with the first tagged release. Until then, building from source is the
-supported path.
+Prebuilt binaries ship with the tagged alpha releases (Linux x64/arm64,
+macOS Intel/Apple Silicon, Windows). Alpha releases are GitHub prereleases,
+so pin the tag when using the one-liner installers:
+
+```bash
+# Linux / macOS
+AGENTOS_VERSION=v0.1.0-alpha curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.sh | sh
+```
+
+```powershell
+# Windows
+$env:AGENTOS_VERSION="v0.1.0-alpha"; iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.ps1 | iex
+```
+
+Building from source remains the most reliable path for contributors.
 
 ## Current Status
 
