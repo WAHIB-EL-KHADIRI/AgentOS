@@ -628,7 +628,7 @@ async fn handle_publish(
     // Fan out to subscribers
     {
         let subs = subscribers.read().await;
-        for (_agent_id, senders) in subs.iter() {
+        for senders in subs.values() {
             for tx in senders {
                 let _ = tx.send(id.clone()).await;
             }
