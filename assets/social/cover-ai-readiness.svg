@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="420" viewBox="0 0 1000 420">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1000" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f7f8fb"/>
+      <stop offset="1" stop-color="#eef1f7"/>
+    </linearGradient>
+    <linearGradient id="accent2" x1="0" y1="0" x2="1000" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0071e3"/>
+      <stop offset="1" stop-color="#00a7b5"/>
+    </linearGradient>
+  </defs>
+  <rect width="1000" height="420" fill="url(#bg2)"/>
+  <rect x="0" y="0" width="1000" height="7" fill="url(#accent2)"/>
+  <text x="70" y="110" font-family="Inter, ui-sans-serif, sans-serif" font-size="15" fill="#667085" letter-spacing="1">OPEN SOURCE · SEO AUDITING</text>
+  <text x="70" y="180" font-family="Inter, ui-sans-serif, sans-serif" font-size="42" font-weight="700" fill="#0b0d12">Is Your Site Readable</text>
+  <text x="70" y="228" font-family="Inter, ui-sans-serif, sans-serif" font-size="42" font-weight="700" fill="#0b0d12">by AI Agents?</text>
+  <g font-family="Inter, ui-sans-serif, sans-serif" font-size="16" fill="#344054">
+    <circle cx="80" cy="272" r="4" fill="#0071e3"/>
+    <text x="96" y="277">robots.txt · llms.txt · Markdown alternates</text>
+  </g>
+  <g font-family="Inter, ui-sans-serif, sans-serif" font-size="15" font-weight="600">
+    <rect x="70" y="304" width="130" height="32" rx="16" fill="#ffffff" stroke="#e4e7ec"/>
+    <text x="86" y="325" fill="#0057b8">TypeScript</text>
+    <rect x="212" y="304" width="150" height="32" rx="16" fill="#ffffff" stroke="#e4e7ec"/>
+    <text x="228" y="325" fill="#0057b8">Open Source</text>
+  </g>
+  <text x="70" y="380" font-family="ui-monospace, monospace" font-size="15" fill="#98a2b3">github.com/every-app/open-seo/pull/122</text>
+</svg>

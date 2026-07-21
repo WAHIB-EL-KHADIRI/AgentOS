@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="420" viewBox="0 0 1000 420">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1000" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0b0d12"/>
+      <stop offset="1" stop-color="#111826"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1000" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0071e3"/>
+      <stop offset="1" stop-color="#00a7b5"/>
+    </linearGradient>
+  </defs>
+  <rect width="1000" height="420" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1000" height="7" fill="url(#accent)"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#5b6577" font-size="15">
+    <text x="70" y="90">$ cargo build --workspace &amp;&amp; git tag v0.1.0-alpha</text>
+  </g>
+  <text x="70" y="200" font-family="Inter, ui-sans-serif, sans-serif" font-size="46" font-weight="700" fill="#ffffff">I Shipped My First Rust Release</text>
+  <text x="70" y="248" font-family="Inter, ui-sans-serif, sans-serif" font-size="27" fill="#a9b2c3">CI Turned Red Twice in 20 Minutes</text>
+  <g font-family="Inter, ui-sans-serif, sans-serif" font-size="15" font-weight="600">
+    <rect x="70" y="286" width="82" height="32" rx="16" fill="#141a26" stroke="#2a3244"/>
+    <text x="86" y="307" fill="#00c2c2">Rust</text>
+    <rect x="164" y="286" width="140" height="32" rx="16" fill="#141a26" stroke="#2a3244"/>
+    <text x="180" y="307" fill="#4da3ff">Open Source</text>
+    <rect x="316" y="286" width="120" height="32" rx="16" fill="#141a26" stroke="#2a3244"/>
+    <text x="332" y="307" fill="#4da3ff">CI/CD</text>
+  </g>
+  <text x="70" y="380" font-family="ui-monospace, monospace" font-size="15" fill="#3d4658">github.com/WAHIB-EL-KHADIRI/AgentOS</text>
+</svg>
