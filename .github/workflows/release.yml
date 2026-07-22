@@ -19,9 +19,10 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          # aarch64-unknown-linux-gnu is out of the alpha matrix: openssl-sys
-          # can't cross-compile without an arm64 sysroot. Tracked in the
-          # "aarch64-linux release builds" issue (rustls or vendored openssl).
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross_cc: aarch64-linux-gnu-gcc
+            cross_apt_package: gcc-aarch64-linux-gnu
           - target: x86_64-apple-darwin
             os: macos-latest
           - target: aarch64-apple-darwin
@@ -38,7 +39,18 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Only the arm64-on-x86_64 cross target needs this: rustls's crypto
+      # backend (ring) compiles small C/asm shims for the target arch, which
+      # needs a real cross C toolchain even though there's no system OpenSSL
+      # dependency anymore. Every other target in this matrix builds natively.
+      - name: Install cross C toolchain
+        if: matrix.cross_apt_package
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.cross_apt_package }}
+
       - name: Build release
+        env:
+          CC_aarch64_unknown_linux_gnu: ${{ matrix.cross_cc }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross_cc }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package (Unix)
