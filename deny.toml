@@ -36,6 +36,10 @@ allow = [
     "CC0-1.0",
     "BSL-1.0",
     "MPL-2.0",
+    # webpki-roots (rustls-tls's Mozilla CA root bundle, pulled in by the
+    # reqwest rustls-tls switch): a data license for the certificate bundle
+    # itself, not code — the standard, widely-accepted license for this crate.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 exceptions = []
