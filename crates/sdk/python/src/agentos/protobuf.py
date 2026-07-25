@@ -5,7 +5,7 @@ protobuf compiler or runtime library. The encoding follows the standard
 protobuf binary wire format as defined in the AgentOS bus protocol spec.
 """
 
-from typing import Sequence
+from collections.abc import Sequence
 
 # ---------------------------------------------------------------------------
 # Protobuf wire format primitives
