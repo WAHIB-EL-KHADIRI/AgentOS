@@ -3,7 +3,8 @@
 import json
 import logging
 import time
-from typing import Any, AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 import httpx
 
