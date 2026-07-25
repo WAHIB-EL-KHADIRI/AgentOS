@@ -14,7 +14,7 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -23,7 +23,7 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -33,7 +33,17 @@ jobs:
         run: cd dashboard && npm ci
 
       - name: Repository check script
-        run: bash scripts/check.sh
+        run: bash scripts/check.sh 2>&1 | tee check_output.log
+
+      - name: Publish failure log to run summary
+        if: failure()
+        run: |
+          {
+            echo '## check.sh failure tail'
+            echo '```'
+            tail -c 60000 check_output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets
@@ -47,7 +57,7 @@ jobs:
   security-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-audit
         run: cargo install cargo-audit
@@ -63,7 +73,7 @@ jobs:
   secrets-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install gitleaks
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | \
@@ -75,14 +85,24 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov
       - name: Generate coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info 2>&1 | tee coverage_output.log
+
+      - name: Publish failure log to run summary
+        if: failure()
+        run: |
+          {
+            echo '## coverage failure tail'
+            echo '```'
+            tail -c 60000 coverage_output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
@@ -96,8 +116,8 @@ jobs:
       run:
         working-directory: crates/sdk/python
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -114,11 +134,12 @@ jobs:
       run:
         working-directory: crates/sdk/typescript
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
+          cache-dependency-path: crates/sdk/typescript/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: Build
@@ -132,11 +153,12 @@ jobs:
       run:
         working-directory: dashboard
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
+          cache-dependency-path: dashboard/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: Build
