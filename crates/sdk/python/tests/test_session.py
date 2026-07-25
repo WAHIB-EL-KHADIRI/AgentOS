@@ -3,8 +3,9 @@
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from agentos.session import AgentSession
+
 from agentos.client import AgentClient
+from agentos.session import AgentSession
 
 
 def test_session_creation():
