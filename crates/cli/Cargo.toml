@@ -11,9 +11,9 @@ name = "agentOS"
 path = "src/main.rs"
 
 [dependencies]
-agentos-kernel = { path = "../kernel" }
-agentos-bus = { path = "../bus" }
-agentos-trace = { path = "../trace" }
+agentos-kernel = { path = "../kernel", version = "0.1.0" }
+agentos-bus = { path = "../bus", version = "0.1.0" }
+agentos-trace = { path = "../trace", version = "0.1.0" }
 tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -26,7 +26,7 @@ serde_json.workspace = true
 chrono.workspace = true
 rusqlite.workspace = true
 rustyline = "14"
-notify = { version = "7", features = ["macos_kqueue"] }
+notify = { version = "8", features = ["macos_kqueue"] }
 miette = { version = "7", features = ["fancy"] }
 
 [lints]
