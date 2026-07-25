@@ -14,7 +14,15 @@ serde_json.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
-reqwest = { version = "0.12", features = ["json", "stream"] }
+# default-features off: drops native-tls -> openssl-sys, which needs a
+# platform OpenSSL install and can't cross-compile (e.g. x86_64 host ->
+# aarch64-linux target) without extra toolchain setup. rustls-tls is a pure
+# Rust TLS stack with no system dependency, on every target uniformly.
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "stream",
+  "rustls-tls",
+] }
 futures.workspace = true
 bytes = "1"
 
