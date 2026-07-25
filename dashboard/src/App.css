@@ -867,7 +867,9 @@ body,
   padding: 5px 16px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .app__tab:hover {
@@ -942,7 +944,9 @@ body,
   border-radius: var(--radius-sm);
   cursor: pointer;
   word-break: break-all;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 
 .sessions__item:hover {
