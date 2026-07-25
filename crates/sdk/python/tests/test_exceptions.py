@@ -2,10 +2,10 @@
 
 from agentos.exceptions import (
     AgentOSError,
+    ConfigurationError,
     ConnectionError,
     PublishError,
     SubscribeError,
-    ConfigurationError,
 )
 
 
