@@ -1,3 +1,3 @@
-# AgentOS ownership and review routing.
+# Default owner for everything in the repo, unless a more specific rule
+# below matches. Requires review from this account before merging.
 * @WAHIB-EL-KHADIRI
-

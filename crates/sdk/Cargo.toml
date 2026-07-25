@@ -6,11 +6,11 @@ license.workspace = true
 description = "High-level SDK for building AgentOS agents in Rust"
 
 [dependencies]
-agentos-bus = { path = "../bus" }
-agentos-kernel = { path = "../kernel" }
-agentos-trace = { path = "../trace" }
-agentos-vault = { path = "../vault" }
-agentos-llm = { path = "../llm" }
+agentos-bus = { path = "../bus", version = "0.1.0" }
+agentos-kernel = { path = "../kernel", version = "0.1.0" }
+agentos-trace = { path = "../trace", version = "0.1.0" }
+agentos-vault = { path = "../vault", version = "0.1.0" }
+agentos-llm = { path = "../llm", version = "0.1.0" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
