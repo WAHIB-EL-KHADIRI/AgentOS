@@ -22,15 +22,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: rust
-          build-mode: autobuild
+          build-mode: none
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
