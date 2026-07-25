@@ -13,23 +13,34 @@ export default function SessionExplorer() {
   const [session, setSession] = useState<RecordedSession | null>(null);
   const [sessionState, setSessionState] = useState<LoadState>("ready");
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
-  const loadList = useCallback(async () => {
+  // All state updates happen in promise callbacks (never synchronously in
+  // the effect body), with a cancellation guard against stale responses.
+  useEffect(() => {
+    let cancelled = false;
+    fetchJournalIds()
+      .then((journals) => {
+        if (cancelled) return;
+        setIds(journals);
+        setListError(null);
+        setListState("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setListError(err instanceof Error ? err.message : String(err));
+        setListState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  const refreshList = useCallback(() => {
     setListState("loading");
     setListError(null);
-    try {
-      const journals = await fetchJournalIds();
-      setIds(journals);
-      setListState("ready");
-    } catch (err) {
-      setListError(err instanceof Error ? err.message : String(err));
-      setListState("error");
-    }
+    setReloadToken((token) => token + 1);
   }, []);
-
-  useEffect(() => {
-    void loadList();
-  }, [loadList]);
 
   const selectSession = useCallback(async (id: string) => {
     setSelectedId(id);
@@ -50,7 +61,7 @@ export default function SessionExplorer() {
       <aside className="sessions__list">
         <div className="sessions__list-head">
           <h3>Recorded sessions</h3>
-          <button type="button" onClick={() => void loadList()} aria-label="Refresh sessions">
+          <button type="button" onClick={refreshList} aria-label="Refresh sessions">
             ⟳
           </button>
         </div>
@@ -60,7 +71,7 @@ export default function SessionExplorer() {
         {listState === "error" && (
           <div className="sessions__hint sessions__hint--error" role="alert">
             <p>Could not load sessions: {listError}</p>
-            <button type="button" onClick={() => void loadList()}>
+            <button type="button" onClick={refreshList}>
               Retry
             </button>
           </div>
@@ -70,8 +81,8 @@ export default function SessionExplorer() {
           <div className="sessions__hint">
             <p>No recorded sessions yet.</p>
             <p>
-              Run an agent with an LLM provider configured — every execution
-              step is journaled automatically and shows up here.
+              Run an agent with an LLM provider configured — every execution step is journaled
+              automatically and shows up here.
             </p>
           </div>
         )}
