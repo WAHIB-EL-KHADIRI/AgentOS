@@ -1,11 +1,11 @@
 """Tests for protobuf wire format encoding."""
 
 from agentos.protobuf import (
+    _encode_field,
+    _encode_varint,
     build_envelope,
     build_publish_request,
     build_subscribe_request,
-    _encode_varint,
-    _encode_field,
 )
 
 

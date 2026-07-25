@@ -1,7 +1,5 @@
 """Async context manager for AgentOS sessions."""
 
-from typing import Any
-
 from .client import AgentClient
 
 
@@ -25,5 +23,5 @@ class AgentSession:
         await self.client.connect(self.agent_id)
         return self.client
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         await self.client.disconnect()
