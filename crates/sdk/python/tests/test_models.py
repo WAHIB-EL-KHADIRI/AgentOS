@@ -1,6 +1,6 @@
 """Tests for AgentOS data models."""
 
-from agentos.models import AgentEnvelope, PublishedMessage, AgentInfo, SSEMessage
+from agentos.models import AgentEnvelope, AgentInfo, PublishedMessage, SSEMessage
 
 
 def test_agent_envelope_defaults():

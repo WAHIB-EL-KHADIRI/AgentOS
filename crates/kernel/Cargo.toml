@@ -17,12 +17,12 @@ uuid.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
-agentos-bus = { path = "../bus" }
-agentos-trace = { path = "../trace" }
-agentos-memory = { path = "../memory" }
-agentos-vault = { path = "../vault" }
-agentos-registry = { path = "../registry" }
-agentos-llm = { path = "../llm" }
+agentos-bus = { path = "../bus", version = "0.1.0" }
+agentos-trace = { path = "../trace", version = "0.1.0" }
+agentos-memory = { path = "../memory", version = "0.1.0" }
+agentos-vault = { path = "../vault", version = "0.1.0" }
+agentos-registry = { path = "../registry", version = "0.1.0" }
+agentos-llm = { path = "../llm", version = "0.1.0" }
 sha2.workspace = true
 hex.workspace = true
 
@@ -35,7 +35,6 @@ futures.workspace = true
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-paste.workspace = true
 
 [[bench]]
 name = "kernel_bench"
