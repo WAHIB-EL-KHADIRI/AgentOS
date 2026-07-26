@@ -172,13 +172,26 @@ agentOS replay --checkpoint ckpt_456
 These commands define the intended developer workflow for inspecting agents,
 logs, traces, and replay checkpoints.
 
-Recorded execution sessions (journals) unlock deterministic replay and fork:
+Recorded execution sessions (journals) unlock deterministic replay:
 
 ```bash
 # Re-execute a recorded session with recorded LLM responses.
 # No API key or network needed; drift against the recording is reported.
 agentOS replay --session agent_123
+```
 
+Sessions are journaled automatically by `agentOS run` under
+`<data_dir>/journals/`. Replays are journaled too, so a replay can itself be
+replayed. Replay is deterministic at the LLM boundary; tools re-execute for
+real and any changed tool behavior is reported as drift.
+
+### Forking (not implemented yet)
+
+`agentOS fork` is a placeholder. The command parses its arguments and then
+reports that trace forking is not implemented; it does not replay a prefix or
+continue against a live provider. The intended shape, once it lands:
+
+```bash
 # Replay the first 2 recorded exchanges, then continue with the live provider.
 agentOS fork --session agent_123 --at 2 --prompt "Try a different approach"
 
@@ -186,10 +199,8 @@ agentOS fork --session agent_123 --at 2 --prompt "Try a different approach"
 agentOS fork --from <exchange_checkpoint>
 ```
 
-Sessions are journaled automatically by `agentOS run` under
-`<data_dir>/journals/`. Replays and forks are journaled too, so a fork can
-itself be replayed or forked. Replay is deterministic at the LLM boundary;
-tools re-execute for real and any changed tool behavior is reported as drift.
+The journal side of this already exists: `replay --session` prints the
+per-exchange checkpoints that will serve as fork anchors.
 
 ## State Lifecycle Commands
 
