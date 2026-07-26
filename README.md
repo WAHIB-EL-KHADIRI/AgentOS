@@ -51,14 +51,17 @@ bus, a live SSE event stream, and a recorded trace you can replay later.
 
 Your agent did something weird on step 7. Reproducing it costs real API calls —
 and never behaves the same twice. AgentOS journals every LLM exchange and tool
-result at the provider boundary, so any run can be replayed deterministically
-and forked into alternate timelines:
+result at the provider boundary, so any run can be replayed deterministically:
 
 ```bash
-agentOS run --agent my_agent.toml      # every execution step is journaled automatically
+agentOS run --agent my_agent.toml     # every execution step is journaled automatically
 agentOS replay --session agent_123    # re-run offline: no API key, no cost, drift-checked
-agentOS fork --from ckpt_4 --prompt "try the other path"   # branch from any checkpoint
 ```
+
+Branching a checkpoint into an alternate timeline is the next step on this
+path. The journal already records per-exchange checkpoints as fork anchors,
+but `agentOS fork` is currently a placeholder: it reports that forking is not
+implemented yet.
 
 <!-- TODO(launch): demo GIF of the dashboard Recordings scrubber goes here -->
 
@@ -157,10 +160,10 @@ Experimental:
   when the model requests them, with every call and result recorded as
   trace checkpoints, logs, and live dashboard events (capped rounds,
   provider-agnostic result passing).
-- Deterministic session replay and fork: every execution step is journaled
+- Deterministic session replay: every execution step is journaled
   (LLM exchanges + tool results); `agentOS replay --session <agent_id>`
   re-executes it with recorded responses (no API key needed) and reports
-  drift, and `agentOS fork` replays a prefix then continues live.
+  drift.
 - Dashboard Recordings view: a time-travel scrubber over recorded sessions
   (slider and step controls across the prompt, exchanges, tool calls and
   results, with per-exchange checkpoints shown as fork anchors).
@@ -170,6 +173,9 @@ Experimental:
 Planned or still being hardened:
 
 - Stronger restart and recovery guarantees with explicit tests.
+- Trace forking: replaying a prefix from a checkpoint, then continuing live.
+  `agentOS fork` exists as a command but reports that this is not implemented
+  yet.
 - Dashboard diff view between an original run and its forks.
 - Published SDK packages.
 - More integration examples for existing agent frameworks.
@@ -221,7 +227,7 @@ agentOS ps
 agentOS logs --id agent_123
 agentOS trace --id agent_123
 agentOS replay --session agent_123
-agentOS fork --from ckpt_456 --prompt "explore the alternative"
+agentOS fork --from ckpt_456 --prompt "explore the alternative"   # placeholder, see above
 agentOS status
 agentOS doctor
 agentOS repl
