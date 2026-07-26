@@ -1,5 +1,6 @@
 use agentos_bus::AgentBusTrait;
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use std::hint::black_box;
 
 // Benchmarks for the in-memory bus.
 fn bench_in_memory_bus_publish(c: &mut Criterion) {

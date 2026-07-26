@@ -16,7 +16,7 @@ hex.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 aes-gcm = "0.10"
-rand = "0.9"
+rand = "0.10"
 zeroize = { version = "1", features = ["derive"] }
 
 [lints]
