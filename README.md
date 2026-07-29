@@ -182,20 +182,33 @@ Planned or still being hardened:
 
 ## Architecture
 
-```text
-CLI / SDK / Dashboard
-        |
-        v
-Runtime
-        |
-        v
-Supervisor
-        |
-        v
-Bus / State / Trace
-        |
-        v
-Agents / Tools
+```mermaid
+flowchart TD
+    subgraph Clients["Entry points"]
+        CLI["CLI - crates/cli"]
+        SDK["Rust SDK - crates/sdk"]
+        DASH["React Dashboard"]
+    end
+    Clients -->|"HTTP / gRPC / SSE / WS"| KERNEL
+
+    subgraph Runtime["AgentOS Runtime"]
+        KERNEL["Kernel + Supervisor<br/>lifecycle / restart / health"]
+        BUS["Message Bus<br/>in-mem / gRPC / SSE / WS"]
+        TRACE["Trace<br/>record / replay / diff / checkpoint"]
+        VAULT["Vault<br/>secrets / encryption / scopes / audit"]
+        MEM["Memory<br/>store / embeddings"]
+        REG["Registry<br/>discovery / health"]
+        LLM["LLM<br/>provider abstractions"]
+    end
+
+    KERNEL --> BUS
+    KERNEL --> VAULT
+    KERNEL --> REG
+    KERNEL --> TRACE
+    BUS <--> AGENTS["Agents and Tools"]
+    AGENTS --> MEM
+    AGENTS --> LLM
+    TRACE -.->|"time-travel replay"| KERNEL
 ```
 
 Repository layout:
