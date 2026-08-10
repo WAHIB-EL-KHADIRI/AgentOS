@@ -3,6 +3,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.94%2B-orange)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)
 [![CI](https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml/badge.svg)](https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/WAHIB-EL-KHADIRI/AgentOS/badge)](https://scorecard.dev/viewer/?uri=github.com/WAHIB-EL-KHADIRI/AgentOS)
 [![Windows](https://img.shields.io/badge/windows-supported-blue)](scripts/check.ps1)
 [![Docs](https://img.shields.io/badge/docs-available-blue)](docs/)
 [![Install](https://img.shields.io/badge/install-one--liner-success)](#quick-start)
