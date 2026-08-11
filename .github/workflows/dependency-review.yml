@@ -1,0 +1,22 @@
+name: Dependency Review
+
+# Supply-chain gate: blocks PRs that introduce known-vulnerable dependencies
+# or disallowed licenses before they reach main. Read-only, PR-scoped.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
