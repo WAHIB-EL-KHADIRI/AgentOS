@@ -17,6 +17,13 @@ updates:
     labels:
       - dependencies
       - typescript
+    groups:
+      sdk-ts:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: npm
     directory: /dashboard
@@ -26,6 +33,23 @@ updates:
     labels:
       - dependencies
       - frontend
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+          - "@testing-library/*"
+      frontend-tooling:
+        patterns:
+          - "eslint*"
+          - "@typescript-eslint/*"
+          - "typescript"
+          - "typescript-eslint"
+          - "vite"
+          - "vitest"
+          - "@vitejs/*"
 
   - package-ecosystem: pip
     directory: /crates/sdk/python
