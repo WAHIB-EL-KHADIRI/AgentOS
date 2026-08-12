@@ -13,6 +13,10 @@ jobs:
   build-binaries:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +73,11 @@ jobs:
           Copy-Item -Path "target/${{ matrix.target }}/release/agentOS.exe" -Destination dist/
           Copy-Item -Path README.md,LICENSE-MIT,LICENSE-APACHE -Destination dist/
           Compress-Archive -Path dist/* -DestinationPath "agentOS-${{ github.ref_name }}-${{ matrix.target }}.zip"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: agentOS-${{ github.ref_name }}-${{ matrix.target }}.*
 
       - uses: actions/upload-artifact@v4
         with:
