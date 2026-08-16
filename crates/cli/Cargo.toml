@@ -25,7 +25,7 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 rusqlite.workspace = true
-rustyline = "14"
+rustyline = "18"
 notify = { version = "8", features = ["macos_kqueue"] }
 miette = { version = "7", features = ["fancy"] }
 
