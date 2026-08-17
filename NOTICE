@@ -1,0 +1,36 @@
+AgentOS
+Copyright (c) 2026 WAHIB EL KHADIRI
+
+Created, designed, and maintained by WAHIB EL KHADIRI
+https://github.com/WAHIB-EL-KHADIRI
+
+This product includes software developed by WAHIB EL KHADIRI and contributors.
+
+Licensed under either of
+  - MIT License        (see LICENSE-MIT)
+  - Apache License 2.0 (see LICENSE-APACHE)
+at your option.
+
+TRADEMARKS
+
+The names "AgentOS" and "agentOS", the project identity, and the associated
+branding are trademarks of WAHIB EL KHADIRI and are NOT licensed under the MIT
+or Apache-2.0 licences. Apache License 2.0 section 6 explicitly excludes
+trademark rights from the grant.
+
+Permitted without asking:
+  - Using, modifying, and redistributing the code, including commercially,
+    under the licence terms.
+  - Factual references such as "built on AgentOS" or "compatible with AgentOS".
+
+Not permitted without written permission from the author:
+  - Naming a fork, product, or hosted service "AgentOS" or a confusingly
+    similar variation.
+  - Using the project name or branding in a way that suggests the author's
+    endorsement, sponsorship, or official status.
+
+ATTRIBUTION
+
+Redistributions in source or binary form must retain this NOTICE file, the
+copyright statement above, and the licence texts, as required by the Apache
+License 2.0 section 4.
