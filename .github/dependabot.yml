@@ -60,6 +60,8 @@ updates:
       - dependencies
       - python
 
+  # Actions are pinned to commit SHAs, which never move on their own.
+  # This is what keeps a pin from sitting on a known-vulnerable version.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -68,3 +70,22 @@ updates:
     labels:
       - dependencies
       - ci
+
+  # Base images carry OS-level CVEs; nothing was watching them.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - security
+
+  - package-ecosystem: docker
+    directory: /dashboard
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - security
