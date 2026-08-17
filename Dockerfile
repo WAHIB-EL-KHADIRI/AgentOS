@@ -1,5 +1,8 @@
 # Stage 1: Build
-FROM rust:1-slim-bookworm AS builder
+# Base images are pinned by digest, not tag: a tag is mutable and can be
+# repointed at a different image. Dependabot's docker ecosystem keeps these
+# digests current, so pinning does not mean sitting on unpatched CVEs.
+FROM rust:1-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3 AS builder
 
 WORKDIR /app
 COPY . .
@@ -12,7 +15,7 @@ RUN cp target/release/agentOS /agentOS
 RUN mkdir -p /templates && cp -r templates/* /templates/
 
 # Stage 2: Supervisor monitor image
-FROM debian:bookworm-slim AS supervisor
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS supervisor
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
@@ -34,7 +37,7 @@ ENV RUST_LOG=info \
 CMD ["agentOS", "supervisor"]
 
 # Stage 3: Full runtime
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \

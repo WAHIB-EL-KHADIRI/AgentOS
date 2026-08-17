@@ -138,8 +138,10 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -e ".[dev]"
+      # ruff comes from the [dev] extra installed above; installing it again
+      # unpinned pulled whatever version happened to be latest at run time.
       - name: Lint
-        run: pip install ruff && ruff check src/ tests/
+        run: ruff check src/ tests/
       - name: Test
         run: python -m pytest tests/ -v
 
