@@ -15,6 +15,9 @@ members = [
     "examples/sdk",
     "examples/code-review",
 ]
+# fuzz/ carries its own [workspace] and needs a nightly toolchain; keeping it
+# out here means `cargo build --workspace` is unaffected by it.
+exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
