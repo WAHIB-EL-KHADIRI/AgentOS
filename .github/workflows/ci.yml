@@ -137,8 +137,15 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: pip install -e ".[dev]"
-      # ruff comes from the [dev] extra installed above; installing it again
+        # Hash-pinned: pip refuses to install anything whose digest is not in
+        # requirements-dev.txt, so a compromised or yanked-and-republished
+        # package cannot enter CI. Regenerate with:
+        #   uv pip compile pyproject.toml --extra dev --generate-hashes \
+        #     --universal --python-version 3.10 -o requirements-dev.txt
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps
+      # ruff comes from the hash-pinned lock above; installing it again
       # unpinned pulled whatever version happened to be latest at run time.
       - name: Lint
         run: ruff check src/ tests/
