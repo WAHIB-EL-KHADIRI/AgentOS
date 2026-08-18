@@ -101,7 +101,8 @@ jobs:
           tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
           chmod +x "$RUNNER_TEMP/gitleaks"
       - name: Secret scan
-        run: "$RUNNER_TEMP/gitleaks" detect --source=. --no-git --verbose
+        run: |
+          "$RUNNER_TEMP/gitleaks" detect --source=. --no-git --verbose
 
   coverage:
     runs-on: ubuntu-latest
