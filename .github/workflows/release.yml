@@ -49,7 +49,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # No build cache here, deliberately. GitHub Actions caches are writable
+      # from other branches, so a poisoned entry could be restored into the job
+      # that produces the signed, attested binaries people download. Release
+      # builds are cold builds; the extra minutes buy an artifact whose inputs
+      # came only from this commit. CI keeps its cache -- it publishes nothing.
 
       # Only the arm64-on-x86_64 cross target needs this: rustls's crypto
       # backend (ring) compiles small C/asm shims for the target arch, which
@@ -65,22 +69,31 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross_cc }}
         run: cargo build --release --target ${{ matrix.target }}
 
+      # `github.ref_name` is the tag name: whoever can create a tag chooses
+      # that string, and expanding it directly into a shell body executes it.
+      # Passing through `env:` makes it a shell variable, which is data.
       - name: Package (Unix)
         if: runner.os != 'Windows'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/agentOS dist/
+          cp "target/$TARGET/release/agentOS" dist/
           cp README.md LICENSE-MIT LICENSE-APACHE dist/
-          cd dist && tar czf "../agentOS-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" *
+          cd dist && tar czf "../agentOS-$REF_NAME-$TARGET.tar.gz" *
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          Copy-Item -Path "target/${{ matrix.target }}/release/agentOS.exe" -Destination dist/
+          Copy-Item -Path "target/$env:TARGET/release/agentOS.exe" -Destination dist/
           Copy-Item -Path README.md,LICENSE-MIT,LICENSE-APACHE -Destination dist/
-          Compress-Archive -Path dist/* -DestinationPath "agentOS-${{ github.ref_name }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path dist/* -DestinationPath "agentOS-$env:REF_NAME-$env:TARGET.zip"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
@@ -117,7 +130,9 @@ jobs:
           fi
 
       - name: Check release notes
-        run: test -f "docs/releases/${{ github.ref_name }}.md"
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: test -f "docs/releases/$REF_NAME.md"
 
       - name: Create Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
