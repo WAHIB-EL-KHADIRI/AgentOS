@@ -6,6 +6,9 @@ use tracing::{debug, error, info, warn};
 use crate::provider::{LLMProvider, LLMProviderError, LLMProviderResult};
 use crate::types::*;
 
+/// Gemini's OpenAI-compatible surface. Same wire format, different host.
+const GEMINI_OPENAI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
+
 /// OpenAI-compatible LLM provider.
 pub struct OpenAIProvider {
     api_key: String,
@@ -46,6 +49,26 @@ impl OpenAIProvider {
         let api_key = std::env::var("OPENAI_API_KEY").ok()?;
         let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o".into());
         Some(Self::new(api_key, model))
+    }
+
+    /// Google Gemini through its OpenAI-compatible endpoint.
+    ///
+    /// Gemini serves `/chat/completions` with the same request and response
+    /// shape this provider already speaks, so it needs a key, a model and a
+    /// different base URL -- not a second HTTP client. Reusing this provider
+    /// means Gemini inherits the streaming, tool-call and error handling that
+    /// are already tested here, rather than a parallel implementation that
+    /// drifts.
+    ///
+    /// Reads `GEMINI_API_KEY`, falling back to `GOOGLE_API_KEY`, and
+    /// `GEMINI_MODEL` (default `gemini-2.0-flash`).
+    pub fn gemini_from_env() -> Option<Self> {
+        let api_key = std::env::var("GEMINI_API_KEY")
+            .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+            .ok()?;
+        let model =
+            std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.0-flash".into());
+        Some(Self::new(api_key, model).with_base_url(GEMINI_OPENAI_BASE_URL))
     }
 
     fn build_request_body(&self, request: &ChatCompletionRequest) -> serde_json::Value {
@@ -363,6 +386,64 @@ fn parse_stream_chunk(chunk: serde_json::Value) -> LLMProviderResult<ChatComplet
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Restores whatever was there before, so these do not leak into the rest
+    /// of the suite. Kept in one test because the process env is shared and
+    /// separate tests would race each other.
+    #[test]
+    fn gemini_from_env_reads_keys_and_points_at_the_gemini_endpoint() {
+        let orig_gemini = std::env::var("GEMINI_API_KEY").ok();
+        let orig_google = std::env::var("GOOGLE_API_KEY").ok();
+        let orig_model = std::env::var("GEMINI_MODEL").ok();
+
+        std::env::remove_var("GEMINI_API_KEY");
+        std::env::remove_var("GOOGLE_API_KEY");
+        std::env::remove_var("GEMINI_MODEL");
+        assert!(
+            OpenAIProvider::gemini_from_env().is_none(),
+            "no key configured must not silently produce a provider"
+        );
+
+        std::env::set_var("GEMINI_API_KEY", "test-key-not-a-real-secret");
+        let p = OpenAIProvider::gemini_from_env().expect("key present");
+        let rendered = format!("{p:?}");
+        assert!(
+            rendered.contains(GEMINI_OPENAI_BASE_URL),
+            "must target Gemini, not api.openai.com: {rendered}"
+        );
+        assert!(rendered.contains("gemini-2.0-flash"), "default model");
+        assert!(
+            !rendered.contains("test-key-not-a-real-secret"),
+            "Debug must not render the key: {rendered}"
+        );
+
+        std::env::set_var("GEMINI_MODEL", "gemini-2.5-pro");
+        let p = OpenAIProvider::gemini_from_env().expect("key present");
+        assert!(format!("{p:?}").contains("gemini-2.5-pro"), "model override");
+
+        // GOOGLE_API_KEY is only a fallback -- it must work on its own.
+        std::env::remove_var("GEMINI_API_KEY");
+        std::env::set_var("GOOGLE_API_KEY", "fallback-key-not-a-real-secret");
+        assert!(
+            OpenAIProvider::gemini_from_env().is_some(),
+            "GOOGLE_API_KEY must be accepted as a fallback"
+        );
+
+        // A plain OpenAI provider must be unaffected by any of this.
+        let openai = OpenAIProvider::new("sk-test", "gpt-4o");
+        assert!(format!("{openai:?}").contains("https://api.openai.com/v1"));
+
+        for (k, v) in [
+            ("GEMINI_API_KEY", orig_gemini),
+            ("GOOGLE_API_KEY", orig_google),
+            ("GEMINI_MODEL", orig_model),
+        ] {
+            match v {
+                Some(val) => std::env::set_var(k, val),
+                None => std::env::remove_var(k),
+            }
+        }
+    }
 
     #[test]
     fn test_build_request_body() {
