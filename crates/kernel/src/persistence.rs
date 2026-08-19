@@ -68,10 +68,7 @@ impl Persistence {
         let json = serde_json::to_string_pretty(&snapshot)
             .map_err(|e| AgentError::Internal(format!("serialization error: {e}")))?;
 
-        let path = self
-            .data_dir
-            .join("traces")
-            .join(format!("{agent_id}.json"));
+        let path = self.trace_path(agent_id);
 
         let mut file = tokio::fs::File::create(&path)
             .await
@@ -85,10 +82,7 @@ impl Persistence {
     }
 
     pub async fn load_trace(&self, agent_id: &str) -> AgentResult<Vec<RecordedThought>> {
-        let path = self
-            .data_dir
-            .join("traces")
-            .join(format!("{agent_id}.json"));
+        let path = self.trace_path(agent_id);
 
         let content = tokio::fs::read_to_string(&path)
             .await
@@ -144,6 +138,18 @@ impl Persistence {
         })?;
 
         Ok(vault)
+    }
+
+    /// Trace files are addressed by agent id, and an id is just a string on
+    /// `AgentSpec` -- an embedder can take one from a manifest it did not
+    /// author. Interpolating it raw let `../..` walk out of the data dir, so
+    /// this goes through the same flattening `journal_path` uses. Both the
+    /// read and the write side must call this, or a sanitized write becomes
+    /// an unfindable read.
+    fn trace_path(&self, agent_id: &str) -> PathBuf {
+        self.data_dir
+            .join("traces")
+            .join(format!("{}.json", sanitize_file_id(agent_id)))
     }
 
     fn journal_path(&self, agent_id: &str) -> PathBuf {
@@ -230,7 +236,9 @@ impl Persistence {
     }
 }
 
-/// Keep journal filenames safe regardless of agent id contents.
+/// Keep journal and trace filenames safe regardless of agent id contents.
+/// Flattening is idempotent, so ids that come back out of `list_traces` as
+/// filename stems still resolve through `load_trace`.
 fn sanitize_file_id(id: &str) -> String {
     id.chars()
         .map(|c| {
@@ -267,6 +275,67 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].content, "step 1");
         assert_eq!(loaded[1].content, "step 2");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn trace_paths_stay_inside_the_data_dir() {
+        // `save_journal` routes its agent id through `sanitize_file_id`; the
+        // trace pair interpolated it straight into the path instead. An id is
+        // just a string on `AgentSpec` and an embedder can take one from a
+        // manifest it did not author, so a traversing id has to land inside
+        // the data dir rather than wherever it points.
+        //
+        // The escape target carries the same uuid as the data dir, so this
+        // test owns a path nothing else can collide with -- a shared target
+        // could be failed by another run's leftovers, or, worse, cleaned up
+        // by them and pass while the bug is present.
+        let tag = uuid::Uuid::new_v4();
+        let dir = std::env::temp_dir().join(format!("agentos_traversal_{tag}"));
+        let persist = Persistence::new(&dir);
+        persist.ensure_dirs().await.unwrap();
+
+        let escaping_id = format!("../../escaped-{tag}");
+        let escape_target = dir.parent().unwrap().join(format!("escaped-{tag}.json"));
+        assert!(
+            !escape_target.exists(),
+            "test precondition: {} must not exist yet",
+            escape_target.display()
+        );
+
+        let mut recorder = TraceRecorder::new();
+        recorder.record_checkpoint("evil", "payload");
+
+        persist
+            .save_trace(&escaping_id, recorder.thoughts())
+            .await
+            .unwrap();
+
+        let escaped = escape_target.exists();
+        let _ = std::fs::remove_file(&escape_target);
+        assert!(
+            !escaped,
+            "save_trace wrote outside the data dir, to {}",
+            escape_target.display()
+        );
+
+        let written: Vec<_> = std::fs::read_dir(dir.join("traces"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            written,
+            vec![format!("______escaped-{tag}.json")],
+            "the traversing id should have been flattened into the traces dir"
+        );
+
+        // Sanitizing has to be applied identically on the read side, or a
+        // safe write turns into a load that can never find its own file.
+        let loaded = persist.load_trace(&escaping_id).await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].content, "payload");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
