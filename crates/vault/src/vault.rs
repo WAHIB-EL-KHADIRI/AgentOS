@@ -26,7 +26,7 @@ pub enum VaultError {
     Encryption(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecretValue {
     inner: String,
     #[serde(skip)]
@@ -62,6 +62,19 @@ impl SecretValue {
         let mut hasher = Sha256::new();
         hasher.update(self.inner.as_bytes());
         hex::encode(hasher.finalize())
+    }
+}
+
+/// Redacted like `Display`. Deriving `Debug` here printed `inner` verbatim, so
+/// a single `{:?}` on a secret -- or on any struct holding one, including the
+/// whole `Vault` -- put live credentials into logs. `Display` was already
+/// careful; the two must not disagree about what a secret is allowed to reveal.
+impl std::fmt::Debug for SecretValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretValue")
+            .field("inner", &"***")
+            .field("access_count", &self.access_count)
+            .finish()
     }
 }
 

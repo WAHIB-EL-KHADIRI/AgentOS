@@ -785,9 +785,18 @@ fn configured_llm_provider_from_env() -> Option<Arc<dyn LLMProvider>> {
         "openai" => OpenAIProvider::from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>),
         "anthropic" => AnthropicProvider::from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>),
         "ollama" => OllamaProvider::from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>),
+        "gemini" | "google" => {
+            OpenAIProvider::gemini_from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>)
+        }
+        // `auto` probes in order of how explicit the key name is. Gemini comes
+        // last because GOOGLE_API_KEY is a broad name that may be set for an
+        // unrelated Google service; picking it silently would be surprising.
         "auto" | "" => OpenAIProvider::from_env()
             .map(|p| Arc::new(p) as Arc<dyn LLMProvider>)
-            .or_else(|| AnthropicProvider::from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>)),
+            .or_else(|| AnthropicProvider::from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>))
+            .or_else(|| {
+                OpenAIProvider::gemini_from_env().map(|p| Arc::new(p) as Arc<dyn LLMProvider>)
+            }),
         other => {
             tracing::warn!(provider = %other, "unknown AGENTOS_LLM_PROVIDER value");
             None

@@ -7,7 +7,7 @@ use agentos_kernel::{
     RuntimeConfig,
 };
 use agentos_trace::TraceReplayer;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::run_format::*;
 use crate::sse_bridge::{agent_info_json, agent_status_label, DashboardSseBridge};
@@ -55,15 +55,35 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
         info!(agents = restored_agents, "encrypted vault secrets restored");
     }
 
-    // Refuse silently exposing an unauthenticated runtime beyond localhost.
+    // Refuse to expose an unauthenticated runtime beyond localhost.
+    //
+    // This used to print a warning and start anyway. A warning on stderr is
+    // not a control: it scrolls past, it is invisible under a process
+    // supervisor, and the resulting process still serves every API to the
+    // network. Binding off-localhost is the one moment where the operator has
+    // clearly asked for exposure, so it is the right moment to fail closed.
+    // AGENTOS_ALLOW_UNAUTHENTICATED exists for setups that terminate auth in
+    // front (mTLS, a reverse proxy) -- deliberate, and visible in the config.
     let api_token = agentos_bus::ApiToken::from_env();
     let local_hosts = ["127.0.0.1", "localhost", "::1"];
+    let opted_out = std::env::var("AGENTOS_ALLOW_UNAUTHENTICATED")
+        .map(|v| matches!(v.trim(), "1" | "true" | "yes"))
+        .unwrap_or(false);
     if !local_hosts.contains(&runtime_config.host.as_str()) && !api_token.required() {
-        eprintln!(
-            "warning: binding to '{}' without AGENTOS_API_TOKEN — all runtime APIs are unauthenticated",
-            runtime_config.host
-        );
-        eprintln!("         set AGENTOS_API_TOKEN to require Bearer auth on HTTP, gRPC, and SSE");
+        if opted_out {
+            warn!(
+                host = %runtime_config.host,
+                "serving unauthenticated APIs off-localhost because AGENTOS_ALLOW_UNAUTHENTICATED is set"
+            );
+        } else {
+            anyhow::bail!(
+                "refusing to bind to '{}' without AGENTOS_API_TOKEN: every runtime API \
+                 (HTTP, gRPC, SSE, WebSocket) would be reachable unauthenticated.\n\
+                 Set AGENTOS_API_TOKEN to require Bearer auth, bind to 127.0.0.1 instead, \
+                 or set AGENTOS_ALLOW_UNAUTHENTICATED=1 if auth is enforced in front of this process.",
+                runtime_config.host
+            );
+        }
     }
 
     // SSE event stream for the dashboard. The bridge subscribes before the

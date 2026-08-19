@@ -1,4 +1,4 @@
-﻿name: Release
+name: Release
 
 on:
   push:
@@ -41,7 +41,7 @@ jobs:
             os: windows-latest
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -49,7 +49,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # No build cache here, deliberately. GitHub Actions caches are writable
+      # from other branches, so a poisoned entry could be restored into the job
+      # that produces the signed, attested binaries people download. Release
+      # builds are cold builds; the extra minutes buy an artifact whose inputs
+      # came only from this commit. CI keeps its cache -- it publishes nothing.
 
       # Only the arm64-on-x86_64 cross target needs this: rustls's crypto
       # backend (ring) compiles small C/asm shims for the target arch, which
@@ -65,22 +69,31 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross_cc }}
         run: cargo build --release --target ${{ matrix.target }}
 
+      # `github.ref_name` is the tag name: whoever can create a tag chooses
+      # that string, and expanding it directly into a shell body executes it.
+      # Passing through `env:` makes it a shell variable, which is data.
       - name: Package (Unix)
         if: runner.os != 'Windows'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/agentOS dist/
+          cp "target/$TARGET/release/agentOS" dist/
           cp README.md LICENSE-MIT LICENSE-APACHE dist/
-          cd dist && tar czf "../agentOS-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" *
+          cd dist && tar czf "../agentOS-$REF_NAME-$TARGET.tar.gz" *
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          Copy-Item -Path "target/${{ matrix.target }}/release/agentOS.exe" -Destination dist/
+          Copy-Item -Path "target/$env:TARGET/release/agentOS.exe" -Destination dist/
           Copy-Item -Path README.md,LICENSE-MIT,LICENSE-APACHE -Destination dist/
-          Compress-Archive -Path dist/* -DestinationPath "agentOS-${{ github.ref_name }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path dist/* -DestinationPath "agentOS-$env:REF_NAME-$env:TARGET.zip"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
@@ -99,11 +112,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: agentOS-*
           merge-multiple: true
@@ -117,7 +130,9 @@ jobs:
           fi
 
       - name: Check release notes
-        run: test -f "docs/releases/${{ github.ref_name }}.md"
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: test -f "docs/releases/$REF_NAME.md"
 
       - name: Create Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -139,12 +154,12 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -155,7 +170,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -164,7 +179,7 @@ jobs:
             type=sha
 
       - name: Build and push Supervisor image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           target: supervisor
@@ -177,7 +192,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push Runtime image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           target: runtime
@@ -190,7 +205,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push Dashboard image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./dashboard
           push: true
