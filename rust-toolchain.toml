@@ -1,0 +1,17 @@
+# Pinned so the format and lint gates give the same verdict everywhere.
+#
+# `cargo fmt --all --check` is a required check, and rustfmt output changes
+# between releases: on 2026-08-20 CI (rustc 1.97.1) and a contributor on
+# 1.96.1 disagreed about crates/llm/src/openai.rs, with CI green and the
+# local run failing on the same commit. A gate whose verdict depends on which
+# stable you happen to have installed is not a gate.
+#
+# Components are listed here, not only in the workflows: rustup switches to
+# this toolchain for every cargo invocation, so anything the jobs need must
+# be part of this definition or it will not be present when they run.
+#
+# Bumping is deliberate. Dependabot does not manage this file -- raise the
+# channel in its own PR and let the full matrix prove the new release.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy", "llvm-tools-preview"]
