@@ -49,6 +49,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # `rust-toolchain.toml` pins the channel, and rustup honours that file for
+      # every cargo invocation in this job. The action above installed the cross
+      # target into whatever `stable` resolves to on the day the job runs, which
+      # is the pinned release only by coincidence -- the moment stable moves past
+      # the pin, `cargo build --target aarch64-*` fails with the target missing.
+      # Adding it to the *active* toolchain is what keeps that from happening.
+      - name: Add the target to the pinned toolchain
+        run: rustup target add ${{ matrix.target }}
+
       # No build cache here, deliberately. GitHub Actions caches are writable
       # from other branches, so a poisoned entry could be restored into the job
       # that produces the signed, attested binaries people download. Release
