@@ -239,6 +239,14 @@ impl Persistence {
 /// Keep journal and trace filenames safe regardless of agent id contents.
 /// Flattening is idempotent, so ids that come back out of `list_traces` as
 /// filename stems still resolve through `load_trace`.
+/// Flattening is lossy and therefore collides: `a.1`, `a_1` and `a:1` all
+/// become `a_1` and share one file. That is acceptable only while ids are
+/// opaque labels drawn from `[A-Za-z0-9_-]`, where the collapsed characters
+/// cannot appear. Note that the HTTP layer's `is_valid_agent_id` is wider
+/// than that -- it admits `.` and `:` -- so two ids that layer accepts as
+/// distinct can land on the same journal. Containment (canonicalise, then
+/// verify the result is inside the data dir) would preserve distinctness;
+/// flattening trades it for a guarantee that is simpler to audit.
 fn sanitize_file_id(id: &str) -> String {
     id.chars()
         .map(|c| {
@@ -279,6 +287,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn flattening_collides_distinct_ids() {
+        // Documented limitation, pinned so it cannot change unnoticed. The
+        // HTTP layer's `is_valid_agent_id` admits `.` and `:`, so these three
+        // are distinct ids as far as the API is concerned, yet they share one
+        // file here. Fixing that means containment instead of flattening --
+        // a design change, not a tweak -- so this test exists to make the
+        // trade explicit rather than to bless it.
+        assert_eq!(sanitize_file_id("a.1"), "a_1");
+        assert_eq!(sanitize_file_id("a:1"), "a_1");
+        assert_eq!(sanitize_file_id("a_1"), "a_1");
+
+        // Ids inside the intended character set pass through untouched, which
+        // is why the collision stays theoretical for well-formed ids.
+        assert_eq!(sanitize_file_id("agent-7_b"), "agent-7_b");
+    }
     #[tokio::test]
     async fn trace_paths_stay_inside_the_data_dir() {
         // `save_journal` routes its agent id through `sanitize_file_id`; the
