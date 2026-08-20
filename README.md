@@ -1,21 +1,48 @@
-# AgentOS - Runtime Infrastructure for AI Agents
+<h1 align="center">AgentOS</h1>
 
-[![Rust](https://img.shields.io/badge/Rust-1.94%2B-orange)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)
-[![CI](https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml/badge.svg)](https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml)
-[![Windows](https://img.shields.io/badge/windows-supported-blue)](scripts/check.ps1)
-[![Docs](https://img.shields.io/badge/docs-available-blue)](docs/)
-[![Install](https://img.shields.io/badge/install-one--liner-success)](#quick-start)
+<p align="center">
+  <b>Replay any AI agent run — offline, deterministically, for $0.00.</b>
+</p>
 
-AgentOS is an open-source runtime layer for AI agents. It focuses on the
-infrastructure around agents: lifecycle, supervision, messaging, state, secrets,
-observability, and trace replay.
+<p align="center">
+  Runtime infrastructure for AI agents: supervision, journaling, deterministic
+  replay, and time-travel debugging. Written in Rust.
+</p>
 
-**Created by [WAHIB EL KHADIRI](https://github.com/WAHIB-EL-KHADIRI)** — founder and architect.
+<p align="center">
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.94%2B-orange" alt="Rust 1.94+"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue" alt="License: MIT OR Apache-2.0"></a>
+  <a href="https://github.com/WAHIB-EL-KHADIRI/AgentOS/actions/workflows/ci.yml"><img src="https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/WAHIB-EL-KHADIRI/AgentOS"><img src="https://api.scorecard.dev/projects/github.com/WAHIB-EL-KHADIRI/AgentOS/badge" alt="OpenSSF Scorecard"></a>
+  <a href="scripts/check.ps1"><img src="https://img.shields.io/badge/windows-supported-blue" alt="Windows supported"></a>
+  <a href="docs/"><img src="https://img.shields.io/badge/docs-available-blue" alt="Docs"></a>
+</p>
 
-Most agent frameworks help you build an agent workflow. AgentOS focuses on what
-happens after that workflow needs to run as a long-lived process, fail clearly,
-restart carefully, and be inspected after the fact.
+---
+
+Your agent did something wrong on step 7. Reproducing it costs real API calls,
+and it never behaves the same way twice.
+
+```bash
+agentOS run --agent my_agent.toml     # every step is journaled as it happens
+agentOS replay --session agent_123    # re-run it offline: no API key, no cost
+agentOS fork --from ckpt_4 --prompt "try the other path"
+```
+
+That is the idea. Everything else in this repository exists to make those three
+commands trustworthy.
+
+### Why this is not another agent framework
+
+- Frameworks help you **build** a workflow. AgentOS handles what happens
+  **after** it has to run as a long-lived process: fail clearly, restart
+  carefully, and be inspected after the fact.
+- Every LLM exchange and tool result is journaled **at the provider boundary**,
+  so a replay is a real re-execution against recorded responses — not a log viewer.
+- It sits **underneath** LangGraph, AutoGen, CrewAI, or your own agent loop.
+  It does not replace them.
+
+**Created and maintained by [WAHIB EL KHADIRI](https://github.com/WAHIB-EL-KHADIRI)** — founder and architect.
 
 ## See it run
 
@@ -51,14 +78,17 @@ bus, a live SSE event stream, and a recorded trace you can replay later.
 
 Your agent did something weird on step 7. Reproducing it costs real API calls —
 and never behaves the same twice. AgentOS journals every LLM exchange and tool
-result at the provider boundary, so any run can be replayed deterministically
-and forked into alternate timelines:
+result at the provider boundary, so any run can be replayed deterministically:
 
 ```bash
-agentOS run --agent my_agent.toml      # every execution step is journaled automatically
+agentOS run --agent my_agent.toml     # every execution step is journaled automatically
 agentOS replay --session agent_123    # re-run offline: no API key, no cost, drift-checked
-agentOS fork --from ckpt_4 --prompt "try the other path"   # branch from any checkpoint
 ```
+
+Branching a checkpoint into an alternate timeline is the next step on this
+path. The journal already records per-exchange checkpoints as fork anchors,
+but `agentOS fork` is currently a placeholder: it reports that forking is not
+implemented yet.
 
 <!-- TODO(launch): demo GIF of the dashboard Recordings scrubber goes here -->
 
@@ -122,12 +152,12 @@ so pin the tag when using the one-liner installers:
 
 ```bash
 # Linux / macOS
-AGENTOS_VERSION=v0.1.0-alpha curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.sh | sh
+AGENTOS_VERSION=v0.1.0-alpha.2 curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.sh | sh
 ```
 
 ```powershell
 # Windows
-$env:AGENTOS_VERSION="v0.1.0-alpha"; iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.ps1 | iex
+$env:AGENTOS_VERSION="v0.1.0-alpha.2"; iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.ps1 | iex
 ```
 
 Building from source remains the most reliable path for contributors.
@@ -157,10 +187,10 @@ Experimental:
   when the model requests them, with every call and result recorded as
   trace checkpoints, logs, and live dashboard events (capped rounds,
   provider-agnostic result passing).
-- Deterministic session replay and fork: every execution step is journaled
+- Deterministic session replay: every execution step is journaled
   (LLM exchanges + tool results); `agentOS replay --session <agent_id>`
   re-executes it with recorded responses (no API key needed) and reports
-  drift, and `agentOS fork` replays a prefix then continues live.
+  drift.
 - Dashboard Recordings view: a time-travel scrubber over recorded sessions
   (slider and step controls across the prompt, exchanges, tool calls and
   results, with per-exchange checkpoints shown as fork anchors).
@@ -170,26 +200,42 @@ Experimental:
 Planned or still being hardened:
 
 - Stronger restart and recovery guarantees with explicit tests.
+- Trace forking: replaying a prefix from a checkpoint, then continuing live.
+  `agentOS fork` exists as a command but reports that this is not implemented
+  yet.
 - Dashboard diff view between an original run and its forks.
 - Published SDK packages.
 - More integration examples for existing agent frameworks.
 
 ## Architecture
 
-```text
-CLI / SDK / Dashboard
-        |
-        v
-Runtime
-        |
-        v
-Supervisor
-        |
-        v
-Bus / State / Trace
-        |
-        v
-Agents / Tools
+```mermaid
+flowchart TD
+    subgraph Clients["Entry points"]
+        CLI["CLI - crates/cli"]
+        SDK["Rust SDK - crates/sdk"]
+        DASH["React Dashboard"]
+    end
+    Clients -->|"HTTP / gRPC / SSE / WS"| KERNEL
+
+    subgraph Runtime["AgentOS Runtime"]
+        KERNEL["Kernel + Supervisor<br/>lifecycle / restart / health"]
+        BUS["Message Bus<br/>in-mem / gRPC / SSE / WS"]
+        TRACE["Trace<br/>record / replay / diff / checkpoint"]
+        VAULT["Vault<br/>secrets / encryption / scopes / audit"]
+        MEM["Memory<br/>store / embeddings"]
+        REG["Registry<br/>discovery / health"]
+        LLM["LLM<br/>provider abstractions"]
+    end
+
+    KERNEL --> BUS
+    KERNEL --> VAULT
+    KERNEL --> REG
+    KERNEL --> TRACE
+    BUS <--> AGENTS["Agents and Tools"]
+    AGENTS --> MEM
+    AGENTS --> LLM
+    TRACE -.->|"time-travel replay"| KERNEL
 ```
 
 Repository layout:
@@ -221,7 +267,7 @@ agentOS ps
 agentOS logs --id agent_123
 agentOS trace --id agent_123
 agentOS replay --session agent_123
-agentOS fork --from ckpt_456 --prompt "explore the alternative"
+agentOS fork --from ckpt_456 --prompt "explore the alternative"   # placeholder, see above
 agentOS status
 agentOS doctor
 agentOS repl
@@ -294,6 +340,28 @@ welcome and credited, while the project identity and technical direction remain
 stewarded by WAHIB EL KHADIRI.
 
 Read more: [`FOUNDER.md`](FOUNDER.md)
+
+## Ownership and trademark
+
+AgentOS was created, designed, and is maintained by
+**[WAHIB EL KHADIRI](https://github.com/WAHIB-EL-KHADIRI)**. Authorship and
+copyright of the original work stay with the author; see [`AUTHORS`](AUTHORS),
+[`NOTICE`](NOTICE), and [`FOUNDER.md`](FOUNDER.md).
+
+**The code is open source. The name is not.** The marks *AgentOS* and *agentOS*,
+the project identity, and the associated branding are reserved by the author and
+are **not** granted by the MIT or Apache-2.0 licence. Those licences cover
+copyright and patents — never trademarks (see Apache-2.0 §6).
+
+This means anyone may use, fork, and build on the code, including commercially.
+Nobody may present a fork, product, or service **as AgentOS**, imply it is the
+official project, or use the name in a way that suggests endorsement by the
+author. For any use of the name beyond plain factual reference
+("built on AgentOS"), ask first.
+
+Contributions are accepted under the project's licence terms
+([`CONTRIBUTING.md`](CONTRIBUTING.md)), which keeps the licensing history of the
+project clean and under the maintainer's control.
 
 ## License
 

@@ -15,6 +15,9 @@ members = [
     "examples/sdk",
     "examples/code-review",
 ]
+# fuzz/ carries its own [workspace] and needs a nightly toolchain; keeping it
+# out here means `cargo build --workspace` is unaffected by it.
+exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
@@ -37,9 +40,9 @@ thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 once_cell = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
-prost = "0.12"
+prost = "0.14"
 async-trait = "0.1"
 futures = "0.3"
 clap = { version = "4", features = ["derive", "env"] }
@@ -47,7 +50,7 @@ clap_complete = "4"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 tokio-stream = "0.1"
 tonic = "0.12"
 parking_lot = "0.12"

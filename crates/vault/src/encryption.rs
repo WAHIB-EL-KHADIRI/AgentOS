@@ -2,7 +2,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use rand::TryRngCore;
+use rand::TryRng;
 use zeroize::Zeroize;
 
 use crate::VaultError;
@@ -66,10 +66,10 @@ impl VaultEncryption {
             .map_err(|e| VaultError::Encryption(e.to_string()))?;
 
         let mut nonce_bytes = [0u8; NONCE_LEN];
-        let mut os_rng = rand::rngs::OsRng;
-        os_rng
+        let mut sys_rng = rand::rngs::SysRng;
+        sys_rng
             .try_fill_bytes(&mut nonce_bytes)
-            .expect("OsRng failure: system entropy source unavailable");
+            .expect("SysRng failure: system entropy source unavailable");
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let ciphertext = cipher
@@ -137,10 +137,10 @@ impl std::fmt::Debug for VaultEncryption {
 
 fn generate_key() -> [u8; KEY_LEN] {
     let mut key = [0u8; KEY_LEN];
-    let mut os_rng = rand::rngs::OsRng;
-    os_rng
+    let mut sys_rng = rand::rngs::SysRng;
+    sys_rng
         .try_fill_bytes(&mut key)
-        .expect("OsRng failure: system entropy source unavailable");
+        .expect("SysRng failure: system entropy source unavailable");
     key
 }
 

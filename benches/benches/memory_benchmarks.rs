@@ -1,6 +1,7 @@
 use agentos_memory::embedder::HashingEmbedder;
 use agentos_memory::Embedder;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 
 fn bench_embedding(c: &mut Criterion) {
     let embedder = HashingEmbedder::new(128);

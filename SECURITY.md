@@ -3,21 +3,54 @@
 AgentOS includes components for secrets, permissions, agent isolation, runtime
 control, and observability. Security reports are important and welcome.
 
+## Supported Versions
+
+| Version | Supported |
+| --- | --- |
+| `0.1.x` (pre-release) | Yes — fixes land on `main` |
+| older / unreleased commits | No |
+
+AgentOS is pre-1.0. Only the latest `main` and the most recent tagged release
+receive security fixes.
+
 ## Reporting a Vulnerability
 
-Please do not open a public issue for a security vulnerability.
+Please do not open a public issue, discussion, or pull request for a security
+vulnerability.
 
-Report privately to the project maintainer:
+**Report privately here:**
+<https://github.com/WAHIB-EL-KHADIRI/AgentOS/security/advisories/new>
 
-- Maintainer: WAHIB EL KHADIRI
-- GitHub: `WAHIB-EL-KHADIRI`
+That form is GitHub's private vulnerability reporting. It is visible only to
+the maintainer, it keeps the report out of public view until a fix ships, and
+it lets us credit you in the resulting advisory.
 
 Include:
 
-- affected component
-- reproduction steps
-- expected impact
+- affected component and version or commit
+- reproduction steps, ideally a minimal proof of concept
+- expected impact, and who is exposed
 - suggested fix, if known
+
+### What to expect
+
+| Stage | Target |
+| --- | --- |
+| Acknowledgement of your report | within 48 hours |
+| Initial assessment and severity | within 7 days |
+| Fix or documented mitigation | within 90 days of triage |
+| Public advisory | after a fix is available, coordinated with you |
+
+If a report goes unanswered past these windows, you are free to disclose
+publicly. Silence is not a request for secrecy.
+
+### Safe harbour
+
+Research done in good faith under this policy is welcome. That means: work only
+against your own instances, do not access or modify data that is not yours, do
+not degrade the service for others, and give the maintainer a reasonable window
+to respond before publishing. Reports made under those terms will not be met
+with legal action.
 
 ## Scope
 

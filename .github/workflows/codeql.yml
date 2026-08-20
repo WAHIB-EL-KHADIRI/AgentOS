@@ -9,6 +9,11 @@ on:
     # Weekly, so new CodeQL query packs get run even with no code changes.
     - cron: "17 3 * * 1"
 
+# Deny by default at workflow level; the analyze job opts back in below.
+# Without this the workflow inherits the repository default token scope.
+permissions:
+  contents: read
+
 jobs:
   analyze:
     name: Analyze (rust)
@@ -20,15 +25,17 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3
         with:
           languages: rust
           build-mode: none
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3
         with:
           category: "/language:rust"

@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::handshake::server::{
 };
 use tracing::{error, info, warn};
 
-use crate::{AgentBusTrait, AgentEnvelope};
+use crate::{AgentBusTrait, AgentEnvelope, ApiToken};
 
 /// WebSocket message types for the agent bus protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +56,7 @@ pub struct WsServer {
     clients: Arc<RwLock<Vec<WsClient>>>,
     event_tx: broadcast::Sender<(String, AgentEnvelope)>,
     allowed_origins: HashSet<String>,
+    api_token: ApiToken,
 }
 
 impl WsServer {
@@ -66,6 +67,11 @@ impl WsServer {
             clients: Arc::new(RwLock::new(Vec::new())),
             event_tx,
             allowed_origins: HashSet::new(),
+            // Same default as every other surface: absent token means auth is
+            // off. `from_env` so a server built with `new` is protected as
+            // soon as AGENTOS_API_TOKEN is set, rather than silently staying
+            // open because the caller forgot a builder method.
+            api_token: ApiToken::from_env(),
         }
     }
 
@@ -76,6 +82,13 @@ impl WsServer {
         origins: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         self.allowed_origins = origins.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Require `Authorization: Bearer <token>` on the handshake.
+    /// Overrides the token picked up from the environment.
+    pub fn with_api_token(mut self, token: ApiToken) -> Self {
+        self.api_token = token;
         self
     }
 
@@ -108,9 +121,15 @@ impl WsServer {
         peer: SocketAddr,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let allowed_origins = self.allowed_origins.clone();
-        let ws_stream =
-            tokio_tungstenite::accept_hdr_async(stream, OriginValidator { allowed_origins })
-                .await?;
+        let api_token = self.api_token.clone();
+        let ws_stream = tokio_tungstenite::accept_hdr_async(
+            stream,
+            HandshakeGuard {
+                allowed_origins,
+                api_token,
+            },
+        )
+        .await?;
         let (ws_sender, mut ws_receiver) = ws_stream.split();
 
         let agent_id = format!("ws-{}", chrono::Utc::now().timestamp_millis());
@@ -226,13 +245,32 @@ impl WsServer {
     }
 }
 
-/// Validates WebSocket Origin header against an allowlist.
-struct OriginValidator {
+/// Validates the WebSocket handshake: bearer token first, then Origin.
+///
+/// Both checks belong here rather than after the upgrade. Rejecting during the
+/// handshake means an unauthorized peer never reaches the message loop, so it
+/// can neither publish onto the bus nor subscribe to other agents' traffic.
+struct HandshakeGuard {
     allowed_origins: HashSet<String>,
+    api_token: ApiToken,
 }
 
-impl Callback for OriginValidator {
+impl Callback for HandshakeGuard {
     fn on_request(self, request: &Request, response: Response) -> Result<Response, ErrorResponse> {
+        // Authorization before Origin: Origin is a browser-supplied hint and
+        // says nothing about a non-browser client, which is exactly what an
+        // attacker would use to reach `Publish`.
+        if self.api_token.required() {
+            let header = request
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok());
+            let query = request.uri().query();
+            if !self.api_token.authorize_header_or_query(header, query) {
+                warn!("WebSocket connection rejected: missing or invalid API token");
+                return Err(ErrorResponse::new(Some("Unauthorized".to_string())));
+            }
+        }
         if self.allowed_origins.is_empty() {
             return Ok(response);
         }
@@ -291,5 +329,40 @@ mod tests {
         let server = Arc::new(WsServer::new(bus));
         let envelope = AgentEnvelope::new("alice", "bob", "test", vec![0u8; 10]);
         server.broadcast("test", envelope).await;
+    }
+
+    /// The handshake guard is what stands between an anonymous TCP peer and
+    /// `Publish` on the agent bus, so its decision table is worth pinning.
+    #[test]
+    fn handshake_guard_requires_the_token_when_one_is_set() {
+        let token = ApiToken::new(Some("s3cret".into()));
+        assert!(token.required());
+        assert!(token.authorize_header(Some("Bearer s3cret")));
+        assert!(!token.authorize_header(Some("Bearer wrong")));
+        assert!(!token.authorize_header(None));
+        // Browsers cannot set headers on a WebSocket handshake either.
+        assert!(token.authorize_header_or_query(None, Some("token=s3cret")));
+        assert!(!token.authorize_header_or_query(None, Some("token=wrong")));
+    }
+
+    #[test]
+    fn ws_server_picks_up_the_token_from_the_environment_by_default() {
+        // Built with `new`, not the builder: a caller who never calls
+        // `with_api_token` must still be protected when the env var is set.
+        let bus = Arc::new(InMemoryBus::new());
+        let server = WsServer::new(bus);
+        assert_eq!(
+            server.api_token.required(),
+            std::env::var("AGENTOS_API_TOKEN")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn with_api_token_overrides_the_environment() {
+        let bus = Arc::new(InMemoryBus::new());
+        let server = WsServer::new(bus).with_api_token(ApiToken::new(Some("explicit".into())));
+        assert!(server.api_token.required());
     }
 }
