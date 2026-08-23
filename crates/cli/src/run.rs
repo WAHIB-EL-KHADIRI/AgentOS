@@ -20,6 +20,48 @@ use crate::state::{
 };
 use crate::{AgentTemplate, GraphFormat, OutputFormat};
 
+/// Whether the runtime may serve its APIs on a given host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BindDecision {
+    /// Loopback, or a bearer token is required: nothing is exposed unguarded.
+    Allowed,
+    /// Off-localhost with no token, but the operator opted out explicitly.
+    AllowedUnauthenticated,
+    /// Off-localhost with no token and no opt-out. Startup must fail.
+    Refused,
+}
+
+/// Decide whether binding to `host` is acceptable.
+///
+/// This used to print a warning and start anyway. A warning on stderr is not a
+/// control: it scrolls past, it is invisible under a process supervisor, and
+/// the resulting process still serves every API to the network. Binding
+/// off-localhost is the one moment where the operator has clearly asked for
+/// exposure, so it is the right moment to fail closed.
+/// `AGENTOS_ALLOW_UNAUTHENTICATED` exists for setups that terminate auth in
+/// front (mTLS, a reverse proxy) -- deliberate, and visible in the config.
+///
+/// The loopback set is an **allowlist**, deliberately. Anything unrecognised
+/// counts as exposed, so an address this function has never heard of errs
+/// toward refusing to start rather than toward serving it unauthenticated.
+pub(crate) fn bind_decision(host: &str, token_required: bool, opted_out: bool) -> BindDecision {
+    const LOCAL_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
+
+    if LOCAL_HOSTS.contains(&host) || token_required {
+        return BindDecision::Allowed;
+    }
+    if opted_out {
+        return BindDecision::AllowedUnauthenticated;
+    }
+    BindDecision::Refused
+}
+
+/// Parse the opt-out env var. Only these three spellings count; anything else
+/// -- including `0`, `false`, or a typo like `ture` -- leaves the guard armed,
+/// because the safe reading of an unclear value is "not opted out".
+pub(crate) fn unauthenticated_opt_out_is_set(value: &str) -> bool {
+    matches!(value.trim(), "1" | "true" | "yes")
+}
 pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow::Result<()> {
     // Load runtime config (or use defaults)
     let runtime_config = if std::path::Path::new(runtime_config_path).exists() {
@@ -56,26 +98,21 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
     }
 
     // Refuse to expose an unauthenticated runtime beyond localhost.
-    //
-    // This used to print a warning and start anyway. A warning on stderr is
-    // not a control: it scrolls past, it is invisible under a process
-    // supervisor, and the resulting process still serves every API to the
-    // network. Binding off-localhost is the one moment where the operator has
-    // clearly asked for exposure, so it is the right moment to fail closed.
-    // AGENTOS_ALLOW_UNAUTHENTICATED exists for setups that terminate auth in
-    // front (mTLS, a reverse proxy) -- deliberate, and visible in the config.
+    // The decision itself lives in `bind_decision` so it can be tested
+    // without standing up a runtime; see its doc comment for the reasoning.
     let api_token = agentos_bus::ApiToken::from_env();
-    let local_hosts = ["127.0.0.1", "localhost", "::1"];
     let opted_out = std::env::var("AGENTOS_ALLOW_UNAUTHENTICATED")
-        .map(|v| matches!(v.trim(), "1" | "true" | "yes"))
+        .map(|v| unauthenticated_opt_out_is_set(&v))
         .unwrap_or(false);
-    if !local_hosts.contains(&runtime_config.host.as_str()) && !api_token.required() {
-        if opted_out {
+    match bind_decision(&runtime_config.host, api_token.required(), opted_out) {
+        BindDecision::Allowed => {}
+        BindDecision::AllowedUnauthenticated => {
             warn!(
                 host = %runtime_config.host,
                 "serving unauthenticated APIs off-localhost because AGENTOS_ALLOW_UNAUTHENTICATED is set"
             );
-        } else {
+        }
+        BindDecision::Refused => {
             anyhow::bail!(
                 "refusing to bind to '{}' without AGENTOS_API_TOKEN: every runtime API \
                  (HTTP, gRPC, SSE, WebSocket) would be reachable unauthenticated.\n\
@@ -3207,4 +3244,94 @@ capabilities:
     println!("    agentOS run --agent {output}");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loopback_hosts_are_allowed_without_a_token() {
+        for host in ["127.0.0.1", "localhost", "::1"] {
+            assert_eq!(
+                bind_decision(host, false, false),
+                BindDecision::Allowed,
+                "{host} is loopback and must not require a token"
+            );
+        }
+    }
+
+    #[test]
+    fn a_token_allows_any_host() {
+        assert_eq!(
+            bind_decision("0.0.0.0", true, false),
+            BindDecision::Allowed,
+            "a required bearer token is what the guard is protecting against the absence of"
+        );
+    }
+
+    #[test]
+    fn exposed_host_without_a_token_is_refused() {
+        // The regression this exists to catch: if this ever returns anything
+        // but Refused, the runtime starts and serves every API -- HTTP, gRPC,
+        // SSE, WebSocket -- to the network with no authentication at all.
+        for host in ["0.0.0.0", "::", "192.168.1.10", "10.0.0.5", "example.com"] {
+            assert_eq!(
+                bind_decision(host, false, false),
+                BindDecision::Refused,
+                "{host} is not loopback and has no token; startup must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn the_opt_out_downgrades_refusal_to_a_warning_only_when_exposed() {
+        assert_eq!(
+            bind_decision("0.0.0.0", false, true),
+            BindDecision::AllowedUnauthenticated
+        );
+        // Opting out must not change the safe cases into the warning path:
+        // a loopback bind is Allowed outright, not "allowed with a warning".
+        assert_eq!(
+            bind_decision("127.0.0.1", false, true),
+            BindDecision::Allowed
+        );
+        assert_eq!(bind_decision("0.0.0.0", true, true), BindDecision::Allowed);
+    }
+
+    #[test]
+    fn unrecognised_hosts_fail_closed() {
+        // The loopback set is an allowlist. These are all genuinely loopback
+        // or local, and the guard still refuses them -- that is the intended
+        // direction of error: a false refusal is a startup failure the
+        // operator sees, a false allow is a silent exposure they do not.
+        for host in ["127.0.0.2", "LOCALHOST", "[::1]", "0177.0.0.1"] {
+            assert_eq!(
+                bind_decision(host, false, false),
+                BindDecision::Refused,
+                "{host} is outside the allowlist and must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn only_explicit_affirmatives_count_as_opting_out() {
+        for value in ["1", "true", "yes", " true ", "yes\n"] {
+            assert!(
+                unauthenticated_opt_out_is_set(value),
+                "{value:?} should opt out"
+            );
+        }
+        // Anything unclear leaves the guard armed. `0`/`false` are the obvious
+        // ones; `ture` stands in for a typo, which must not silently disable a
+        // security control.
+        for value in [
+            "0", "false", "no", "", " ", "ture", "TRUE", "Yes", "enabled",
+        ] {
+            assert!(
+                !unauthenticated_opt_out_is_set(value),
+                "{value:?} must not opt out"
+            );
+        }
+    }
 }
