@@ -34,10 +34,20 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: dashboard/package-lock.json
+          cache-dependency-path: |
+            dashboard/package-lock.json
+            crates/sdk/typescript/package-lock.json
 
       - name: Install dashboard dependencies
         run: cd dashboard && npm ci
+
+      # check.sh runs the TypeScript SDK's build and tests too, and this job
+      # installed only the dashboard's dependencies, so `npm run test` there
+      # died with `vitest: not found`. That was invisible for as long as the
+      # step's exit status was being discarded; with the pipeline fixed it is
+      # the first thing that surfaces.
+      - name: Install TypeScript SDK dependencies
+        run: cd crates/sdk/typescript && npm ci
 
       # `set -o pipefail` is what makes this step a gate. The default shell for
       # `run:` is `bash -e {0}`, and without pipefail a pipeline's exit status
