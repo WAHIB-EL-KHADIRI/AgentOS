@@ -5,7 +5,6 @@ use agentos_vault::{Vault, VaultEncryption};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::RecordedSession;
-use tokio::io::AsyncWriteExt;
 
 use crate::error::{AgentError, AgentResult};
 
@@ -73,11 +72,13 @@ impl Persistence {
             .join("traces")
             .join(format!("{agent_id}.json"));
 
-        let mut file = tokio::fs::File::create(&path)
-            .await
-            .map_err(|e| AgentError::Internal(format!("cannot write trace file: {e}")))?;
-
-        file.write_all(json.as_bytes())
+        // `tokio::fs::write` opens, writes and closes. The hand-rolled
+        // `File::create` + `write_all` this replaces did not close: a
+        // `tokio::fs::File` buffers and dispatches to the blocking pool, and
+        // dropping it neither flushes nor waits, so `save_trace` could return
+        // `Ok(())` with nothing on disk. `load_trace` then read an empty file
+        // and reported the trace as corrupt.
+        tokio::fs::write(&path, json.as_bytes())
             .await
             .map_err(|e| AgentError::Internal(format!("cannot write trace: {e}")))?;
 
@@ -113,11 +114,19 @@ impl Persistence {
             .map_err(|e| AgentError::Internal(format!("vault encryption error: {e}")))?;
 
         let path = self.vault_path();
-        let mut file = tokio::fs::File::create(&path)
-            .await
-            .map_err(|e| AgentError::Internal(format!("cannot write vault file: {e}")))?;
 
-        file.write_all(&ciphertext)
+        // Same unflushed-write defect as `save_trace`, and worse here:
+        // `File::create` truncates `secrets.enc` before the write is
+        // dispatched, so a lost buffer left the vault empty -- the previous
+        // secrets destroyed, the new ones never stored, and `Ok(())`
+        // returned either way.
+        //
+        // This closes the lost-buffer window, not the crash window: the write
+        // is still in place rather than atomic, so a crash midway through
+        // still truncates the file. Making it a temp-file-plus-rename is the
+        // right next step for a secrets store, and is deliberately left out
+        // of this fix rather than folded into it.
+        tokio::fs::write(&path, &ciphertext)
             .await
             .map_err(|e| AgentError::Internal(format!("cannot write vault: {e}")))?;
 
