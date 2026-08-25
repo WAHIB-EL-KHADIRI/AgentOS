@@ -42,3 +42,12 @@ pub use system::{
     ToolInvocationRecord,
 };
 pub use tools::{RuntimeTool, ToolRegistry};
+
+#[cfg(test)]
+mod neg_probe_checksh {
+    #[test]
+    fn forced_fmt_violation() {
+        let    x=1;
+        assert_eq!(x,1);
+    }
+}
