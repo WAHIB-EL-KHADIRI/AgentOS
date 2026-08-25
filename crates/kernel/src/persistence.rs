@@ -281,6 +281,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_writes_are_reported_rather_than_swallowed() {
+        // The defect these two functions had was not only a lost write, it was
+        // a lost write reported as success. Guarding the happy path alone would
+        // not have caught it, so this pins the error path: with no
+        // `ensure_dirs()` the target directories do not exist, every write
+        // fails, and neither function may answer `Ok`.
+        let dir = std::env::temp_dir().join(format!("agentos_test_nodir_{}", uuid::Uuid::new_v4()));
+        let persist = Persistence::new(&dir);
+
+        let mut recorder = TraceRecorder::new();
+        recorder.record_checkpoint("agent-1", "step 1");
+        assert!(
+            persist
+                .save_trace("agent-1", recorder.thoughts())
+                .await
+                .is_err(),
+            "save_trace reported success while the trace was not written"
+        );
+
+        let mut vault = Vault::new();
+        vault.put("agent-1", "API_KEY", "sk-123");
+        assert!(
+            persist
+                .save_vault(&vault, &VaultEncryption::new())
+                .await
+                .is_err(),
+            "save_vault reported success while the secrets were not written"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn test_persistence_save_and_load_vault_encrypted() {
         let dir = std::env::temp_dir().join(format!("agentos_test_vault_{}", uuid::Uuid::new_v4()));
         let persist = Persistence::new(&dir);
