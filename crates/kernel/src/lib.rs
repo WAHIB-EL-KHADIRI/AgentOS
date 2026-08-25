@@ -42,3 +42,15 @@ pub use system::{
     ToolInvocationRecord,
 };
 pub use tools::{RuntimeTool, ToolRegistry};
+
+#[cfg(test)]
+mod gate_proof {
+    // Deliberately misformatted: `cargo fmt --all --check` inside
+    // scripts/check.sh must reject this. Temporary; this branch exists only
+    // to demonstrate whether that rejection reaches the GitHub job.
+    #[test]
+    fn deliberate_fmt_violation() {
+        let    x=1;
+        assert_eq!(x,1);
+    }
+}
