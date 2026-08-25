@@ -42,3 +42,11 @@ pub use system::{
     ToolInvocationRecord,
 };
 pub use tools::{RuntimeTool, ToolRegistry};
+
+#[cfg(test)]
+mod neg_probe_coverage {
+    #[test]
+    fn forced_test_failure() {
+        panic!("deliberate failure: negative probe for the coverage gate");
+    }
+}
