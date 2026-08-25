@@ -34,13 +34,32 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: dashboard/package-lock.json
+          cache-dependency-path: |
+            dashboard/package-lock.json
+            crates/sdk/typescript/package-lock.json
 
       - name: Install dashboard dependencies
         run: cd dashboard && npm ci
 
+      # check.sh runs the TypeScript SDK's build and tests too, and this job
+      # installed only the dashboard's dependencies, so `npm run test` there
+      # died with `vitest: not found`. That was invisible for as long as the
+      # step's exit status was being discarded; with the pipeline fixed it is
+      # the first thing that surfaces.
+      - name: Install TypeScript SDK dependencies
+        run: cd crates/sdk/typescript && npm ci
+
+      # `set -o pipefail` is what makes this step a gate. The default shell for
+      # `run:` is `bash -e {0}`, and without pipefail a pipeline's exit status
+      # is that of its LAST command -- here `tee`, which succeeds whatever
+      # check.sh did. Every gate inside check.sh (cargo fmt --check, clippy
+      # -D warnings, the workspace test run, cargo audit) was therefore
+      # advisory: it printed its failure into the log and the step went green.
+      # Keep this line for as long as the `| tee` is here.
       - name: Repository check script
-        run: bash scripts/check.sh 2>&1 | tee check_output.log
+        run: |
+          set -o pipefail
+          bash scripts/check.sh 2>&1 | tee check_output.log
 
       - name: Publish failure log to run summary
         if: failure()
@@ -130,8 +149,15 @@ jobs:
           components: llvm-tools-preview
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov
+      # Same pipeline hazard as the check-script step above, and it matters
+      # just as much: `cargo llvm-cov` runs the workspace test suite, so
+      # without pipefail a failing test was reported by `tee` as success.
+      # `coverage` is a required check, which means the suite could break
+      # without anything in this repository going red.
       - name: Generate coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info 2>&1 | tee coverage_output.log
+        run: |
+          set -o pipefail
+          cargo llvm-cov --workspace --lcov --output-path lcov.info 2>&1 | tee coverage_output.log
 
       - name: Publish failure log to run summary
         if: failure()
