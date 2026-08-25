@@ -282,7 +282,24 @@ jobs:
       - name: Smoke test the image
         run: |
           set -o pipefail
-          docker run -d --name dashboard-smoke -p 127.0.0.1:5173:5173 agentos-dashboard:ci
+
+          # `--add-host` supplies the one precondition the image legitimately
+          # has. nginx resolves `proxy_pass http://agentos-bus:9876` at start
+          # up, not per request, so without a resolvable name it exits:
+          #
+          #   nginx: [emerg] host not found in upstream "agentos-bus"
+          #
+          # In compose that name exists. Standalone it does not, and this test
+          # is about the image, not about the network it normally sits in.
+          #
+          # Worth knowing rather than papering over: this means the dashboard
+          # cannot start at all -- not even to serve static files -- if the
+          # bus name is unresolvable at the moment it boots. Decoupling that
+          # would mean a `resolver` plus a variable in `proxy_pass`, which is
+          # a change to proxy behaviour and does not belong in this PR.
+          docker run -d --name dashboard-smoke \
+            --add-host agentos-bus:127.0.0.1 \
+            -p 127.0.0.1:5173:5173 agentos-dashboard:ci
 
           for i in $(seq 1 30); do
             if curl -fsS -o /tmp/index.html -D /tmp/headers.txt http://127.0.0.1:5173/; then
