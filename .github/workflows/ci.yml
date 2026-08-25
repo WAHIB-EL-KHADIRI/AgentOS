@@ -313,6 +313,16 @@ jobs:
             exit 1
           fi
 
+          # The base image was chosen for running unprivileged, and the
+          # patching step above briefly needs root. If a future edit forgets
+          # to drop back, nothing else here would notice.
+          uid="$(docker inspect -f '{{.Config.User}}' agentos-dashboard:ci)"
+          if [ "$uid" = "root" ] || [ "$uid" = "0" ] || [ -z "$uid" ]; then
+            echo "::error::the image runs as '${uid:-root}' -- the unprivileged base was chosen for a reason"
+            exit 1
+          fi
+          echo "runs as uid $uid"
+
           echo "image builds, serves the dashboard, and applies nginx.conf"
 
       - name: Container logs on failure
