@@ -5,7 +5,6 @@ use agentos_vault::{Vault, VaultEncryption};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::RecordedSession;
-use tokio::io::AsyncWriteExt;
 
 use crate::error::{AgentError, AgentResult};
 
@@ -70,11 +69,13 @@ impl Persistence {
 
         let path = self.trace_path(agent_id);
 
-        let mut file = tokio::fs::File::create(&path)
-            .await
-            .map_err(|e| AgentError::Internal(format!("cannot write trace file: {e}")))?;
-
-        file.write_all(json.as_bytes())
+        // `tokio::fs::write` opens, writes and closes. The hand-rolled
+        // `File::create` + `write_all` this replaces did not close: a
+        // `tokio::fs::File` buffers and dispatches to the blocking pool, and
+        // dropping it neither flushes nor waits, so `save_trace` could return
+        // `Ok(())` with nothing on disk. `load_trace` then read an empty file
+        // and reported the trace as corrupt.
+        tokio::fs::write(&path, json.as_bytes())
             .await
             .map_err(|e| AgentError::Internal(format!("cannot write trace: {e}")))?;
 
@@ -107,11 +108,19 @@ impl Persistence {
             .map_err(|e| AgentError::Internal(format!("vault encryption error: {e}")))?;
 
         let path = self.vault_path();
-        let mut file = tokio::fs::File::create(&path)
-            .await
-            .map_err(|e| AgentError::Internal(format!("cannot write vault file: {e}")))?;
 
-        file.write_all(&ciphertext)
+        // Same unflushed-write defect as `save_trace`, and worse here:
+        // `File::create` truncates `secrets.enc` before the write is
+        // dispatched, so a lost buffer left the vault empty -- the previous
+        // secrets destroyed, the new ones never stored, and `Ok(())`
+        // returned either way.
+        //
+        // This closes the lost-buffer window, not the crash window: the write
+        // is still in place rather than atomic, so a crash midway through
+        // still truncates the file. Making it a temp-file-plus-rename is the
+        // right next step for a secrets store, and is deliberately left out
+        // of this fix rather than folded into it.
+        tokio::fs::write(&path, &ciphertext)
             .await
             .map_err(|e| AgentError::Internal(format!("cannot write vault: {e}")))?;
 
@@ -360,6 +369,39 @@ mod tests {
         let loaded = persist.load_trace(&escaping_id).await.unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].content, "payload");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn failed_writes_are_reported_rather_than_swallowed() {
+        // The defect these two functions had was not only a lost write, it was
+        // a lost write reported as success. Guarding the happy path alone would
+        // not have caught it, so this pins the error path: with no
+        // `ensure_dirs()` the target directories do not exist, every write
+        // fails, and neither function may answer `Ok`.
+        let dir = std::env::temp_dir().join(format!("agentos_test_nodir_{}", uuid::Uuid::new_v4()));
+        let persist = Persistence::new(&dir);
+
+        let mut recorder = TraceRecorder::new();
+        recorder.record_checkpoint("agent-1", "step 1");
+        assert!(
+            persist
+                .save_trace("agent-1", recorder.thoughts())
+                .await
+                .is_err(),
+            "save_trace reported success while the trace was not written"
+        );
+
+        let mut vault = Vault::new();
+        vault.put("agent-1", "API_KEY", "sk-123");
+        assert!(
+            persist
+                .save_vault(&vault, &VaultEncryption::new())
+                .await
+                .is_err(),
+            "save_vault reported success while the secrets were not written"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
