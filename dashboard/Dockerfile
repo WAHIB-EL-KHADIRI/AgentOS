@@ -9,7 +9,22 @@ COPY . .
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:alpine@sha256:f972e5322b9797dc2a6b830030094426437b1ae7032e4644496395336ac6fdac
+
+# This base image runs as UID 101, which is the point of choosing it. `apk
+# upgrade` needs root to write /var/log/apk.log and replace system packages,
+# so as written the build failed outright:
+#
+#   ERROR: Unable to open log: Permission denied
+#   process "/bin/sh -c apk upgrade --no-cache" ... exit code: 99
+#
+# Root only for the patching, then straight back. 101 is numeric rather than
+# `nginx` deliberately: it is what the base image's own config declares as
+# User, and a numeric id keeps the guarantee readable to anything checking
+# that the final image is not root.
+USER root
 RUN apk upgrade --no-cache
+USER 101
+
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 5173

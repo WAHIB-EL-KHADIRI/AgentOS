@@ -243,3 +243,109 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+
+  # `dashboard/Dockerfile` was built in exactly one place: release.yml, on a
+  # `v*.*.*` tag, with `push: true`. Its first build and its first publish to
+  # GHCR were the same event, so a broken image was only discoverable by
+  # shipping it. The `dashboard` job above proves `npm run build` works on the
+  # runner; it says nothing about whether the image people actually pull can
+  # be built or will serve anything.
+  #
+  # Same build, no registry: `push: false` with `load: true` so the image
+  # stays on the runner and can be run. Nothing here needs credentials, and
+  # release.yml is deliberately untouched -- publishing behaviour is
+  # unchanged, it simply now has a build that ran first.
+  dashboard-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build the dashboard image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./dashboard
+          push: false
+          load: true
+          tags: agentos-dashboard:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Building proves the Dockerfile compiles; it does not prove the result
+      # serves the application. This starts the image and asks it for the page,
+      # which is the whole reason the image exists. Cheap: the container is up
+      # in about a second.
+      - name: Smoke test the image
+        run: |
+          set -o pipefail
+
+          # `--add-host` supplies the one precondition the image legitimately
+          # has. nginx resolves `proxy_pass http://agentos-bus:9876` at start
+          # up, not per request, so without a resolvable name it exits:
+          #
+          #   nginx: [emerg] host not found in upstream "agentos-bus"
+          #
+          # In compose that name exists. Standalone it does not, and this test
+          # is about the image, not about the network it normally sits in.
+          #
+          # Worth knowing rather than papering over: this means the dashboard
+          # cannot start at all -- not even to serve static files -- if the
+          # bus name is unresolvable at the moment it boots. Decoupling that
+          # would mean a `resolver` plus a variable in `proxy_pass`, which is
+          # a change to proxy behaviour and does not belong in this PR.
+          docker run -d --name dashboard-smoke \
+            --add-host agentos-bus:127.0.0.1 \
+            -p 127.0.0.1:5173:5173 agentos-dashboard:ci
+
+          for i in $(seq 1 30); do
+            if curl -fsS -o /tmp/index.html -D /tmp/headers.txt http://127.0.0.1:5173/; then
+              echo "served after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::the image never served a response on :5173"
+              docker logs dashboard-smoke || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # The build output, not nginx's default landing page.
+          if ! grep -q 'id="root"' /tmp/index.html; then
+            echo "::error::the served page is not the built dashboard"
+            head -c 2000 /tmp/index.html
+            exit 1
+          fi
+
+          # nginx.conf exists mostly to set these. If the config were not
+          # picked up the page would still be served, and this would be the
+          # only thing that noticed.
+          if ! grep -qi '^content-security-policy:' /tmp/headers.txt; then
+            echo "::error::nginx.conf was not applied -- no CSP header on the response"
+            cat /tmp/headers.txt
+            exit 1
+          fi
+
+          # The base image was chosen for running unprivileged, and the
+          # patching step above briefly needs root. If a future edit forgets
+          # to drop back, nothing else here would notice.
+          uid="$(docker inspect -f '{{.Config.User}}' agentos-dashboard:ci)"
+          if [ "$uid" = "root" ] || [ "$uid" = "0" ] || [ -z "$uid" ]; then
+            echo "::error::the image runs as '${uid:-root}' -- the unprivileged base was chosen for a reason"
+            exit 1
+          fi
+          echo "runs as uid $uid"
+
+          echo "image builds, serves the dashboard, and applies nginx.conf"
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs dashboard-smoke || true
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f dashboard-smoke || true
