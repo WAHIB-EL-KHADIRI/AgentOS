@@ -44,8 +44,8 @@ impl fmt::Debug for dyn Tool {
     }
 }
 
-/// Adapts an SDK [`Tool`] to the kernel's [`RuntimeTool`] so tools built
-/// with the SDK execute inside the runtime's LLM tool loop.
+/// Adapts an SDK [`Tool`] to the kernel's [`agentos_kernel::RuntimeTool`] so
+/// tools built with the SDK execute inside the runtime's LLM tool loop.
 pub(crate) struct SdkToolAdapter {
     inner: std::sync::Arc<dyn Tool>,
 }

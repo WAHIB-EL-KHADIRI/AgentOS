@@ -66,8 +66,7 @@ impl OpenAIProvider {
         let api_key = std::env::var("GEMINI_API_KEY")
             .or_else(|_| std::env::var("GOOGLE_API_KEY"))
             .ok()?;
-        let model =
-            std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.0-flash".into());
+        let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.0-flash".into());
         Some(Self::new(api_key, model).with_base_url(GEMINI_OPENAI_BASE_URL))
     }
 
@@ -419,7 +418,10 @@ mod tests {
 
         std::env::set_var("GEMINI_MODEL", "gemini-2.5-pro");
         let p = OpenAIProvider::gemini_from_env().expect("key present");
-        assert!(format!("{p:?}").contains("gemini-2.5-pro"), "model override");
+        assert!(
+            format!("{p:?}").contains("gemini-2.5-pro"),
+            "model override"
+        );
 
         // GOOGLE_API_KEY is only a fallback -- it must work on its own.
         std::env::remove_var("GEMINI_API_KEY");

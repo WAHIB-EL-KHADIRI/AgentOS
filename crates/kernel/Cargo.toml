@@ -34,7 +34,7 @@ rusqlite = { workspace = true, features = ["bundled"] }
 futures.workspace = true
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion.workspace = true
 
 [[bench]]
 name = "kernel_bench"

@@ -82,6 +82,17 @@ run_npm_script() {
     return 0
   fi
 
+  # Without this the missing install surfaces as `vitest: not found` and exit
+  # 127 from inside npm, which reads like a broken test rather than a package
+  # that was never installed. Deliberately an error and not a `[skip]`: the
+  # scripts this runs are gates, and quietly skipping them is how a gate stops
+  # meaning anything.
+  if [ ! -d "$package_dir/node_modules" ]; then
+    echo "$package_dir/node_modules is missing; cannot run $label."
+    echo "Install it first:  (cd $package_dir && npm ci)"
+    return 1
+  fi
+
   say "$label"
   (
     cd "$package_dir"
