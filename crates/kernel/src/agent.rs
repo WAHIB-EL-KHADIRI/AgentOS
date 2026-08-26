@@ -9,6 +9,19 @@ use tokio::sync::{mpsc, Mutex};
 
 use crate::error::{AgentError, AgentResult};
 
+/// An agent's identity, and deliberately **not** a filesystem path.
+///
+/// Ids reach persistence, so the distinction has teeth: `journal_path` and
+/// `trace_path` flatten anything outside `[A-Za-z0-9_-]` into `_`, which is a
+/// correct guard precisely because an id is an opaque label -- nothing is lost
+/// by collapsing separators that were never meaningful to begin with.
+///
+/// If a future requirement ever wants ids to carry real structure (nested
+/// namespaces, say), flattening stops being right and the persistence layer
+/// has to move to canonicalise-then-contain: resolve the candidate path and
+/// verify it is still inside the data dir. Do not widen the character set on
+/// its own and leave the flattening in place -- that combination silently
+/// merges distinct ids onto one file.
 pub type AgentId = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

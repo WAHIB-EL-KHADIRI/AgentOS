@@ -8,9 +8,20 @@
 //! request headers.
 
 /// Optional shared API token loaded from the environment.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ApiToken {
     token: Option<String>,
+}
+
+/// Redacted. Deriving `Debug` printed the live API token, so any `{:?}` on a
+/// server struct holding one would have written it to the log. Whether auth is
+/// enabled is the useful part and is not itself a secret.
+impl std::fmt::Debug for ApiToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApiToken")
+            .field("required", &self.token.is_some())
+            .finish()
+    }
 }
 
 impl ApiToken {

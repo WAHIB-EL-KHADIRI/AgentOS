@@ -203,7 +203,7 @@ impl PluginRuntime {
         let mut results = vec![Val::I32(0); func_ty.results().len()];
 
         func.call(&mut store, &params, &mut results)
-            .map_err(|e| PluginError::Execution(format!("call failed: {e}")))?;
+            .map_err(|e| PluginError::Execution(format!("call failed: {e:#}")))?;
 
         let result = results
             .first()

@@ -23,6 +23,13 @@ on:
 permissions:
   contents: read
 
+# cargo-fuzz needs nightly, and `rust-toolchain.toml` pins the repo to a
+# stable release for the format and lint gates. rustup resolves
+# RUSTUP_TOOLCHAIN before that file, so this is what keeps the pin from
+# silently dragging this workflow onto stable and breaking `cargo fuzz`.
+env:
+  RUSTUP_TOOLCHAIN: nightly
+
 jobs:
   fuzz:
     name: Fuzz ${{ matrix.target }}
@@ -50,11 +57,20 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
 
+      # `inputs.duration` is typed by whoever dispatches this workflow, so
+      # expanding it into the shell body would run it. Through `env:` it is a
+      # variable, and the numeric guard rejects anything that is not digits.
       - name: Run ${{ matrix.target }}
         working-directory: fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+          DURATION: ${{ github.event.inputs.duration || 60 }}
         run: |
-          cargo fuzz run ${{ matrix.target }} -- \
-            -max_total_time=${{ github.event.inputs.duration || 60 }} \
+          case "$DURATION" in
+            ''|*[!0-9]*) echo "duration must be digits only, got: $DURATION"; exit 1 ;;
+          esac
+          cargo fuzz run "$TARGET" -- \
+            -max_total_time="$DURATION" \
             -rss_limit_mb=2048
 
       # A crash file is a reproducer for a real defect: keep it.

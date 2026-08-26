@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -23,24 +23,52 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          components: rustfmt, clippy
+      # `rust-toolchain.toml` is the single source of truth for the channel and
+      # the components. dtolnay/rust-toolchain exports RUSTUP_TOOLCHAIN, and
+      # rustup resolves that variable BEFORE the toolchain file, so the action
+      # would quietly run these gates on whatever `stable` happens to be that
+      # day -- exactly what the file exists to prevent. rustup ships on the
+      # runner image and `rustup show` installs the pinned toolchain along with
+      # the components the file declares.
+      - name: Install the pinned toolchain
+        run: rustup show
+
+      - name: Verify the active toolchain matches the pin
+        uses: ./.github/actions/verify-toolchain
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
-          cache-dependency-path: dashboard/package-lock.json
+          cache-dependency-path: |
+            dashboard/package-lock.json
+            crates/sdk/typescript/package-lock.json
 
       - name: Install dashboard dependencies
         run: cd dashboard && npm ci
 
+      # check.sh runs the TypeScript SDK's build and tests too, and this job
+      # installed only the dashboard's dependencies, so `npm run test` there
+      # died with `vitest: not found`. That was invisible for as long as the
+      # step's exit status was being discarded; with the pipeline fixed it is
+      # the first thing that surfaces.
+      - name: Install TypeScript SDK dependencies
+        run: cd crates/sdk/typescript && npm ci
+
+      # `set -o pipefail` is what makes this step a gate. The default shell for
+      # `run:` is `bash -e {0}`, and without pipefail a pipeline's exit status
+      # is that of its LAST command -- here `tee`, which succeeds whatever
+      # check.sh did. Every gate inside check.sh (cargo fmt --check, clippy
+      # -D warnings, the workspace test run, cargo audit) was therefore
+      # advisory: it printed its failure into the log and the step went green.
+      # Keep this line for as long as the `| tee` is here.
       - name: Repository check script
-        run: bash scripts/check.sh 2>&1 | tee check_output.log
+        run: |
+          set -o pipefail
+          bash scripts/check.sh 2>&1 | tee check_output.log
 
       - name: Publish failure log to run summary
         if: failure()
@@ -67,17 +95,37 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      # See the rust job: the toolchain file is authoritative, and the action
+      # would override it through RUSTUP_TOOLCHAIN.
+      - name: Install the pinned toolchain
+        run: rustup show
+      - name: Verify the active toolchain matches the pin
+        uses: ./.github/actions/verify-toolchain
+      # Pinned: an unpinned `cargo install` resolves at run time, so a
+      # compromised release of the auditing tool would enter the job whose
+      # purpose is auditing. `--locked` also uses each tool's own lockfile.
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
       - name: Install cargo-deny
-        run: cargo install cargo-deny
+        run: cargo install cargo-deny --locked --version 0.20.2
       - name: Dependency vulnerability audit
         run: cargo audit
       - name: Cargo deny check (advisories + bans + licenses)
         run: cargo deny check advisories bans licenses
       - name: Cache deny check
         run: cargo deny check sources
+
+  # Static analysis of the workflows themselves. Everything else in this file
+  # checks the code; nothing checked the thing that builds and publishes it.
+  workflow-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Audit workflows with zizmor
+        run: uvx zizmor@1.29.0 --min-severity high .github/workflows/
 
   secrets-scan:
     runs-on: ubuntu-latest
@@ -86,12 +134,23 @@ jobs:
         with:
           persist-credentials: false
       - name: Install gitleaks
+        # Download to disk and verify the digest BEFORE unpacking or executing.
+        # Piping curl straight into tar runs whatever the network returned,
+        # inside the one job that reads the whole tree looking for secrets.
+        # Staged in RUNNER_TEMP so the archive is not itself scanned.
+        env:
+          GITLEAKS_VERSION: 8.18.2
+          GITLEAKS_SHA256: 6298c9235dfc9278c14b28afd9b7fa4e6f4a289cb1974bd27949fc1e9122bdee
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | \
-            tar -xz gitleaks
-          chmod +x gitleaks
+          set -euo pipefail
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          chmod +x "$RUNNER_TEMP/gitleaks"
       - name: Secret scan
-        run: ./gitleaks detect --source=. --no-git --verbose
+        run: |
+          "$RUNNER_TEMP/gitleaks" detect --source=. --no-git --verbose
 
   coverage:
     runs-on: ubuntu-latest
@@ -99,13 +158,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          components: llvm-tools-preview
+      # See the rust job. `llvm-tools-preview` is declared in
+      # rust-toolchain.toml, so `rustup show` installs it here too -- listing
+      # it in the workflow as well would let the two definitions drift.
+      - name: Install the pinned toolchain
+        run: rustup show
+      - name: Verify the active toolchain matches the pin
+        uses: ./.github/actions/verify-toolchain
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov
+      # Same pipeline hazard as the check-script step above, and it matters
+      # just as much: `cargo llvm-cov` runs the workspace test suite, so
+      # without pipefail a failing test was reported by `tee` as success.
+      # `coverage` is a required check, which means the suite could break
+      # without anything in this repository going red.
       - name: Generate coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info 2>&1 | tee coverage_output.log
+        run: |
+          set -o pipefail
+          cargo llvm-cov --workspace --lcov --output-path lcov.info 2>&1 | tee coverage_output.log
 
       - name: Publish failure log to run summary
         if: failure()
@@ -117,7 +187,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
@@ -132,13 +202,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: pip install -e ".[dev]"
-      # ruff comes from the [dev] extra installed above; installing it again
+        # Hash-pinned: pip refuses to install anything whose digest is not in
+        # requirements-dev.txt, so a compromised or yanked-and-republished
+        # package cannot enter CI. Regenerate with:
+        #   uv pip compile pyproject.toml --extra dev --generate-hashes \
+        #     --universal --python-version 3.10 -o requirements-dev.txt
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps
+      # ruff comes from the hash-pinned lock above; installing it again
       # unpinned pulled whatever version happened to be latest at run time.
       - name: Lint
         run: ruff check src/ tests/
@@ -154,9 +231,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: crates/sdk/typescript/package-lock.json
       - name: Install dependencies
@@ -175,12 +252,118 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: Build
         run: npm run build
+
+  # `dashboard/Dockerfile` was built in exactly one place: release.yml, on a
+  # `v*.*.*` tag, with `push: true`. Its first build and its first publish to
+  # GHCR were the same event, so a broken image was only discoverable by
+  # shipping it. The `dashboard` job above proves `npm run build` works on the
+  # runner; it says nothing about whether the image people actually pull can
+  # be built or will serve anything.
+  #
+  # Same build, no registry: `push: false` with `load: true` so the image
+  # stays on the runner and can be run. Nothing here needs credentials, and
+  # release.yml is deliberately untouched -- publishing behaviour is
+  # unchanged, it simply now has a build that ran first.
+  dashboard-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build the dashboard image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./dashboard
+          push: false
+          load: true
+          tags: agentos-dashboard:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Building proves the Dockerfile compiles; it does not prove the result
+      # serves the application. This starts the image and asks it for the page,
+      # which is the whole reason the image exists. Cheap: the container is up
+      # in about a second.
+      - name: Smoke test the image
+        run: |
+          set -o pipefail
+
+          # `--add-host` supplies the one precondition the image legitimately
+          # has. nginx resolves `proxy_pass http://agentos-bus:9876` at start
+          # up, not per request, so without a resolvable name it exits:
+          #
+          #   nginx: [emerg] host not found in upstream "agentos-bus"
+          #
+          # In compose that name exists. Standalone it does not, and this test
+          # is about the image, not about the network it normally sits in.
+          #
+          # Worth knowing rather than papering over: this means the dashboard
+          # cannot start at all -- not even to serve static files -- if the
+          # bus name is unresolvable at the moment it boots. Decoupling that
+          # would mean a `resolver` plus a variable in `proxy_pass`, which is
+          # a change to proxy behaviour and does not belong in this PR.
+          docker run -d --name dashboard-smoke \
+            --add-host agentos-bus:127.0.0.1 \
+            -p 127.0.0.1:5173:5173 agentos-dashboard:ci
+
+          for i in $(seq 1 30); do
+            if curl -fsS -o /tmp/index.html -D /tmp/headers.txt http://127.0.0.1:5173/; then
+              echo "served after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::the image never served a response on :5173"
+              docker logs dashboard-smoke || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # The build output, not nginx's default landing page.
+          if ! grep -q 'id="root"' /tmp/index.html; then
+            echo "::error::the served page is not the built dashboard"
+            head -c 2000 /tmp/index.html
+            exit 1
+          fi
+
+          # nginx.conf exists mostly to set these. If the config were not
+          # picked up the page would still be served, and this would be the
+          # only thing that noticed.
+          if ! grep -qi '^content-security-policy:' /tmp/headers.txt; then
+            echo "::error::nginx.conf was not applied -- no CSP header on the response"
+            cat /tmp/headers.txt
+            exit 1
+          fi
+
+          # The base image was chosen for running unprivileged, and the
+          # patching step above briefly needs root. If a future edit forgets
+          # to drop back, nothing else here would notice.
+          uid="$(docker inspect -f '{{.Config.User}}' agentos-dashboard:ci)"
+          if [ "$uid" = "root" ] || [ "$uid" = "0" ] || [ -z "$uid" ]; then
+            echo "::error::the image runs as '${uid:-root}' -- the unprivileged base was chosen for a reason"
+            exit 1
+          fi
+          echo "runs as uid $uid"
+
+          echo "image builds, serves the dashboard, and applies nginx.conf"
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs dashboard-smoke || true
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f dashboard-smoke || true

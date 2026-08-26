@@ -11,14 +11,24 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
     "test": "vitest run"
   },
-  "keywords": ["agentos", "agents", "ai", "framework"],
+  "keywords": [
+    "agentos",
+    "agents",
+    "ai",
+    "framework"
+  ],
   "license": "MIT OR Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/WAHIB-EL-KHADIRI/agentOS.git"
@@ -28,6 +38,6 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "eventsource": "^2.0.2"
+    "eventsource": "^4.1.0"
   }
 }
