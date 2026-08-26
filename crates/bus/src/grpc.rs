@@ -430,7 +430,7 @@ fn sse_response_headers(response: &mut Response<BoxBody>) {
 async fn collect_limited_body(
     req: Request<Incoming>,
     context: &str,
-) -> Result<Bytes, Response<BoxBody>> {
+) -> Result<Bytes, Box<Response<BoxBody>>> {
     match Limited::new(req.into_body(), MAX_PROTOBUF_BODY_BYTES)
         .collect()
         .await
@@ -440,7 +440,7 @@ async fn collect_limited_body(
             warn!(%context, error = %e, "request body rejected");
             let mut resp = json_response(r#"{"error":"request body too large or invalid"}"#);
             *resp.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
-            Err(resp)
+            Err(Box::new(resp))
         }
     }
 }
@@ -596,7 +596,7 @@ async fn handle_publish(
 ) -> Result<Response<BoxBody>, hyper::Error> {
     let body_bytes = match collect_limited_body(req, "publish").await {
         Ok(body) => body,
-        Err(resp) => return Ok(resp),
+        Err(resp) => return Ok(*resp),
     };
 
     let publish_req = match PublishRequest::decode(body_bytes) {
@@ -652,7 +652,7 @@ async fn handle_subscribe(
 ) -> Result<Response<BoxBody>, hyper::Error> {
     let body_bytes = match collect_limited_body(req, "subscribe").await {
         Ok(body) => body,
-        Err(resp) => return Ok(resp),
+        Err(resp) => return Ok(*resp),
     };
 
     let sub_req = match SubscribeRequest::decode(body_bytes) {
