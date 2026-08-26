@@ -67,10 +67,7 @@ impl Persistence {
         let json = serde_json::to_string_pretty(&snapshot)
             .map_err(|e| AgentError::Internal(format!("serialization error: {e}")))?;
 
-        let path = self
-            .data_dir
-            .join("traces")
-            .join(format!("{agent_id}.json"));
+        let path = self.trace_path(agent_id);
 
         // `tokio::fs::write` opens, writes and closes. The hand-rolled
         // `File::create` + `write_all` this replaces did not close: a
@@ -86,10 +83,7 @@ impl Persistence {
     }
 
     pub async fn load_trace(&self, agent_id: &str) -> AgentResult<Vec<RecordedThought>> {
-        let path = self
-            .data_dir
-            .join("traces")
-            .join(format!("{agent_id}.json"));
+        let path = self.trace_path(agent_id);
 
         let content = tokio::fs::read_to_string(&path)
             .await
@@ -153,6 +147,18 @@ impl Persistence {
         })?;
 
         Ok(vault)
+    }
+
+    /// Trace files are addressed by agent id, and an id is just a string on
+    /// `AgentSpec` -- an embedder can take one from a manifest it did not
+    /// author. Interpolating it raw let `../..` walk out of the data dir, so
+    /// this goes through the same flattening `journal_path` uses. Both the
+    /// read and the write side must call this, or a sanitized write becomes
+    /// an unfindable read.
+    fn trace_path(&self, agent_id: &str) -> PathBuf {
+        self.data_dir
+            .join("traces")
+            .join(format!("{}.json", sanitize_file_id(agent_id)))
     }
 
     fn journal_path(&self, agent_id: &str) -> PathBuf {
@@ -239,7 +245,17 @@ impl Persistence {
     }
 }
 
-/// Keep journal filenames safe regardless of agent id contents.
+/// Keep journal and trace filenames safe regardless of agent id contents.
+/// Flattening is idempotent, so ids that come back out of `list_traces` as
+/// filename stems still resolve through `load_trace`.
+/// Flattening is lossy and therefore collides: `a.1`, `a_1` and `a:1` all
+/// become `a_1` and share one file. That is acceptable only while ids are
+/// opaque labels drawn from `[A-Za-z0-9_-]`, where the collapsed characters
+/// cannot appear. Note that the HTTP layer's `is_valid_agent_id` is wider
+/// than that -- it admits `.` and `:` -- so two ids that layer accepts as
+/// distinct can land on the same journal. Containment (canonicalise, then
+/// verify the result is inside the data dir) would preserve distinctness;
+/// flattening trades it for a guarantee that is simpler to audit.
 fn sanitize_file_id(id: &str) -> String {
     id.chars()
         .map(|c| {
@@ -276,6 +292,273 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].content, "step 1");
         assert_eq!(loaded[1].content, "step 2");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn flattening_collides_distinct_ids() {
+        // Documented limitation, pinned so it cannot change unnoticed. The
+        // HTTP layer's `is_valid_agent_id` admits `.` and `:`, so these three
+        // are distinct ids as far as the API is concerned, yet they share one
+        // file here. Fixing that means containment instead of flattening --
+        // a design change, not a tweak -- so this test exists to make the
+        // trade explicit rather than to bless it.
+        assert_eq!(sanitize_file_id("a.1"), "a_1");
+        assert_eq!(sanitize_file_id("a:1"), "a_1");
+        assert_eq!(sanitize_file_id("a_1"), "a_1");
+
+        // Ids inside the intended character set pass through untouched, which
+        // is why the collision stays theoretical for well-formed ids.
+        assert_eq!(sanitize_file_id("agent-7_b"), "agent-7_b");
+    }
+    #[tokio::test]
+    async fn trace_paths_stay_inside_the_data_dir() {
+        // `save_journal` routes its agent id through `sanitize_file_id`; the
+        // trace pair interpolated it straight into the path instead. An id is
+        // just a string on `AgentSpec` and an embedder can take one from a
+        // manifest it did not author, so a traversing id has to land inside
+        // the data dir rather than wherever it points.
+        //
+        // The escape target carries the same uuid as the data dir, so this
+        // test owns a path nothing else can collide with -- a shared target
+        // could be failed by another run's leftovers, or, worse, cleaned up
+        // by them and pass while the bug is present.
+        let tag = uuid::Uuid::new_v4();
+        let dir = std::env::temp_dir().join(format!("agentos_traversal_{tag}"));
+        let persist = Persistence::new(&dir);
+        persist.ensure_dirs().await.unwrap();
+
+        let escaping_id = format!("../../escaped-{tag}");
+        let escape_target = dir.parent().unwrap().join(format!("escaped-{tag}.json"));
+        assert!(
+            !escape_target.exists(),
+            "test precondition: {} must not exist yet",
+            escape_target.display()
+        );
+
+        let mut recorder = TraceRecorder::new();
+        recorder.record_checkpoint("evil", "payload");
+
+        persist
+            .save_trace(&escaping_id, recorder.thoughts())
+            .await
+            .unwrap();
+
+        let escaped = escape_target.exists();
+        let _ = std::fs::remove_file(&escape_target);
+        assert!(
+            !escaped,
+            "save_trace wrote outside the data dir, to {}",
+            escape_target.display()
+        );
+
+        let written: Vec<_> = std::fs::read_dir(dir.join("traces"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            written,
+            vec![format!("______escaped-{tag}.json")],
+            "the traversing id should have been flattened into the traces dir"
+        );
+
+        // Sanitizing has to be applied identically on the read side, or a
+        // safe write turns into a load that can never find its own file.
+        let loaded = persist.load_trace(&escaping_id).await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].content, "payload");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One technique per entry rather than variations on one. The test above
+    /// proves the fix works against `../..`; these exist so a future weakening
+    /// fails here instead of shipping.
+    fn traversal_payloads() -> Vec<(&'static str, String)> {
+        vec![
+            ("plain parent", "../escape".into()),
+            ("nested parent", "../../../../../../escape".into()),
+            ("windows separators", r"..\..\..\escape".into()),
+            ("mixed separators", r"..\../..\escape".into()),
+            ("absolute unix", "/etc/passwd".into()),
+            ("absolute windows", r"C:\Windows\System32\escape".into()),
+            ("unc path", r"\\server\share\escape".into()),
+            ("url encoded", "%2e%2e%2f%2e%2e%2fescape".into()),
+            ("double url encoded", "%252e%252e%252fescape".into()),
+            ("overlong utf8 sequence", "..%c0%afescape".into()),
+            (
+                "unicode fullwidth solidus",
+                "..\u{ff0f}..\u{ff0f}escape".into(),
+            ),
+            ("null byte truncation", "safe\u{0}../../escape".into()),
+            ("trailing dots", "escape...".into()),
+            ("current dir prefix", "./././escape".into()),
+            ("embedded newline", "safe\n../../escape".into()),
+            ("embedded tab", "safe\t../escape".into()),
+            ("windows alternate data stream", "escape:hidden".into()),
+            ("windows device name", "CON".into()),
+            ("empty id", String::new()),
+            ("only dots", "..".into()),
+            ("single dot", ".".into()),
+            ("home expansion", "~/escape".into()),
+            ("shell variable", "$HOME/escape".into()),
+            ("very long chain", "../".repeat(200) + "escape"),
+            ("space padded", "  ../escape  ".into()),
+            ("command separator", "escape;rm -rf /".into()),
+        ]
+    }
+
+    fn files_under(dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return out,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                out.extend(files_under(&path));
+            } else {
+                out.push(path);
+            }
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn no_traversal_payload_escapes_the_traces_directory() {
+        // Drives the public API and then asks the filesystem, rather than
+        // asserting on what a helper returned: the claim under test is about
+        // where bytes land.
+        let tag = uuid::Uuid::new_v4();
+        let root = std::env::temp_dir().join(format!("agentos_traversal_suite_{tag}"));
+        let data_dir = root.join("data");
+        let persist = Persistence::new(&data_dir);
+        persist.ensure_dirs().await.unwrap();
+
+        let canonical_traces = std::fs::canonicalize(data_dir.join("traces")).unwrap();
+
+        let mut recorder = TraceRecorder::new();
+        recorder.record_checkpoint("evil", "payload");
+
+        let mut escapes: Vec<String> = Vec::new();
+
+        for (label, id) in traversal_payloads() {
+            // A write is allowed to fail; what it may never do is succeed at a
+            // path outside `traces/`.
+            let _ = persist.save_trace(&id, recorder.thoughts()).await;
+
+            for entry in files_under(&root) {
+                let parent = match entry.parent().map(std::fs::canonicalize) {
+                    Some(Ok(p)) => p,
+                    _ => continue,
+                };
+                if parent != canonical_traces {
+                    escapes.push(format!("[{label}] id {id:?} produced {}", entry.display()));
+                }
+            }
+        }
+
+        // The sandbox's own parent, which a `../` payload aims straight at.
+        let sibling = root.parent().unwrap().join("escape.json");
+        if sibling.exists() {
+            escapes.push(format!(
+                "escaped the sandbox entirely: {}",
+                sibling.display()
+            ));
+            let _ = std::fs::remove_file(&sibling);
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            escapes.is_empty(),
+            "writes landed outside the traces directory:\n{}",
+            escapes.join("\n")
+        );
+    }
+
+    #[test]
+    fn sanitized_output_cannot_express_a_path_component() {
+        // The invariant containment rests on, checked over every Unicode
+        // scalar value rather than a sample. If no input can produce a
+        // separator, a dot or a colon, then `data_dir/traces/<out>.json` is
+        // always exactly one level below `traces/` -- containment by
+        // construction, with no canonicalise-then-check window to race.
+        //
+        // This guards a different axis from the escape test above: that one
+        // catches the call site skipping the sanitizer, this one catches the
+        // sanitizer itself being widened.
+        let mut leaked: Vec<u32> = Vec::new();
+        for cp in 0..=0x10_FFFF_u32 {
+            let ch = match char::from_u32(cp) {
+                Some(c) => c,
+                None => continue,
+            };
+            let out = sanitize_file_id(&ch.to_string());
+            if !out
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
+                leaked.push(cp);
+                if leaked.len() >= 16 {
+                    break;
+                }
+            }
+        }
+        assert!(
+            leaked.is_empty(),
+            "these code points survive outside [A-Za-z0-9_-]: {leaked:04X?}"
+        );
+    }
+
+    #[test]
+    fn sanitizing_is_idempotent_over_every_code_point() {
+        // `list_traces` hands back filename stems and those stems go straight
+        // back into `load_trace`. A second pass that changed anything would
+        // break that round trip for exactly the ids that needed sanitizing.
+        let mut unstable: Vec<u32> = Vec::new();
+        for cp in 0..=0x10_FFFF_u32 {
+            let ch = match char::from_u32(cp) {
+                Some(c) => c,
+                None => continue,
+            };
+            let once = sanitize_file_id(&ch.to_string());
+            if sanitize_file_id(&once) != once {
+                unstable.push(cp);
+                if unstable.len() >= 16 {
+                    break;
+                }
+            }
+        }
+        assert!(
+            unstable.is_empty(),
+            "sanitizing twice differs from sanitizing once for: {unstable:04X?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ids_that_were_always_legitimate_still_round_trip() {
+        // Containment is only worth having if it leaves ordinary ids alone.
+        let tag = uuid::Uuid::new_v4();
+        let dir = std::env::temp_dir().join(format!("agentos_traversal_ok_{tag}"));
+        let persist = Persistence::new(&dir);
+        persist.ensure_dirs().await.unwrap();
+
+        let mut recorder = TraceRecorder::new();
+        recorder.record_checkpoint("a", "legitimate");
+
+        for id in ["agent-1", "agent_2", "AGENT3", "a-b_c-9", "x"] {
+            persist.save_trace(id, recorder.thoughts()).await.unwrap();
+            let loaded = persist.load_trace(id).await.unwrap();
+            assert_eq!(loaded.len(), 1, "id {id} did not round trip");
+            assert_eq!(loaded[0].content, "legitimate");
+            assert!(
+                dir.join("traces").join(format!("{id}.json")).exists(),
+                "id {id} was rewritten when it did not need to be"
+            );
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }
