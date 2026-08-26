@@ -1,0 +1,45 @@
+name: Verify the active Rust toolchain
+description: >-
+  Assert at run time that the toolchain cargo will actually use is the one
+  pinned in rust-toolchain.toml, and fail loudly if it is not.
+
+# Pinning a toolchain in a file is a claim; this is the proof. rustup resolves
+# RUSTUP_TOOLCHAIN before rust-toolchain.toml, so any action or step that
+# exports that variable silently redirects every cargo invocation that follows
+# it -- and the symptom is not an error, it is gates quietly changing meaning.
+# That is how this repository ran its format and lint gates on a moving
+# `stable` while a pinned file sat in the tree.
+#
+# Kept as a composite action rather than copied into each job so the assertion
+# cannot drift between them, and so adding it to a new job is one line.
+runs:
+  using: composite
+  steps:
+    - name: Compare rustc against rust-toolchain.toml
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        expected="$(sed -nE 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' rust-toolchain.toml)"
+        if [ -z "$expected" ]; then
+          echo "::error file=rust-toolchain.toml::no channel found; the pin is not readable"
+          exit 1
+        fi
+
+        actual="$(rustc --version)"
+
+        echo "rust-toolchain.toml pins : $expected"
+        echo "rustc reports            : $actual"
+        echo "rustup resolves          : $(rustup show active-toolchain || true)"
+        echo "RUSTUP_TOOLCHAIN         : ${RUSTUP_TOOLCHAIN:-<unset>}"
+
+        # `rustc 1.97.1 (hash date)` -- the trailing space keeps 1.97.1 from
+        # matching a hypothetical 1.97.11.
+        case "$actual" in
+          "rustc $expected "*) ;;
+          *)
+            echo "::error::toolchain mismatch: rust-toolchain.toml pins $expected but rustc is '$actual'."
+            echo "::error::If a step exports RUSTUP_TOOLCHAIN it overrides the file. Remove it or update the pin deliberately."
+            exit 1
+            ;;
+        esac

@@ -23,6 +23,13 @@ on:
 permissions:
   contents: read
 
+# cargo-fuzz needs nightly, and `rust-toolchain.toml` pins the repo to a
+# stable release for the format and lint gates. rustup resolves
+# RUSTUP_TOOLCHAIN before that file, so this is what keeps the pin from
+# silently dragging this workflow onto stable and breaking `cargo fuzz`.
+env:
+  RUSTUP_TOOLCHAIN: nightly
+
 jobs:
   fuzz:
     name: Fuzz ${{ matrix.target }}
