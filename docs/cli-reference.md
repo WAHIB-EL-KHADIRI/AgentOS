@@ -229,6 +229,23 @@ agentOS state import --input backup.json --replace
 Exports and imports state before SQLite persistence. `--replace` creates an
 automatic backup of the current state before writing.
 
+Exports carry a `version` field naming the schema of the portable JSON
+format. Import refuses a file whose version is newer than the running build
+understands, naming both numbers so it is clear which side needs upgrading:
+
+```
+state export 'backup.json' declares schema version 2 but this build
+understands up to 1; upgrade agentOS to import it
+```
+
+Older exports are always accepted. Files written before the field existed
+carry no `version` key and are read as version 1, so backups taken by any
+earlier release keep importing.
+
+Note that this version is separate from the SQLite schema version reported
+by `agentOS state doctor`. One describes the interchange format, the other
+the on-disk tables, and they move independently.
+
 ```bash
 agentOS state clean --status completed --dry-run
 agentOS state clean --older-than 7d --dry-run

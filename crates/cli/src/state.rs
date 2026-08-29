@@ -42,11 +42,41 @@ pub struct StoredAgentEntry {
     pub updated_at_ms: u64,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+/// Schema version of the portable JSON state export.
+///
+/// Separate from `migrations::CURRENT_SCHEMA_VERSION`, which versions the
+/// SQLite tables. They happen to both be 1 today and will drift apart: the
+/// on-disk database and the interchange format change for different reasons.
+pub const CURRENT_STATE_VERSION: u32 = 1;
+
+/// Exports written before versioning existed carry no `version` key at all.
+/// Absent has to mean 1, or the first thing this guard does is reject every
+/// backup taken up to now -- the opposite of what it is for.
+fn default_state_version() -> u32 {
+    1
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliState {
+    #[serde(default = "default_state_version")]
+    version: u32,
     agents: Vec<StoredAgentEntry>,
     logs: Vec<StoredLogEntry>,
     thoughts: Vec<RecordedThought>,
+}
+
+// Hand-written rather than derived: `#[derive(Default)]` would give
+// `version: 0`, so every freshly created state would serialise a version
+// number that predates the format and that no reader should ever see.
+impl Default for CliState {
+    fn default() -> Self {
+        Self {
+            version: CURRENT_STATE_VERSION,
+            agents: Vec::new(),
+            logs: Vec::new(),
+            thoughts: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -710,8 +740,26 @@ pub fn import_state_to_path(
 fn read_import_file(input: &Path) -> anyhow::Result<CliState> {
     let content = std::fs::read_to_string(input)
         .map_err(|e| anyhow::anyhow!("cannot read import file '{}': {e}", input.display()))?;
-    serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("invalid state import file '{}': {e}", input.display()))
+    let state: CliState = serde_json::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("invalid state import file '{}': {e}", input.display()))?;
+
+    // Every import funnels through here -- both backends reach it via
+    // `import_into_backend` -- so one check covers the JSON and SQLite paths
+    // without either having to remember to call it.
+    //
+    // Only a *newer* version is refused. Older exports are the whole reason
+    // the field defaults, and reading them is the compatibility promise.
+    if state.version > CURRENT_STATE_VERSION {
+        anyhow::bail!(
+            "state export '{}' declares schema version {} but this build understands up to {}; \
+             upgrade agentOS to import it",
+            input.display(),
+            state.version,
+            CURRENT_STATE_VERSION
+        );
+    }
+
+    Ok(state)
 }
 
 fn merge_imported_state(
@@ -1535,6 +1583,110 @@ mod tests {
         assert_eq!(skipped_agents, 0);
         assert!(has_agent(&loaded, "agent_existing"));
         assert!(has_agent(&loaded, "agent_new"));
+    }
+
+    #[test]
+    fn json_export_imported_into_sqlite_exports_back_identically() {
+        // The acceptance criterion from #36, and the piece that was actually
+        // missing: the existing import tests only exercise the JSON backend,
+        // so the SQLite import path had no round-trip coverage at all.
+        let dir = temp_state_dir("roundtrip_json_sqlite");
+        std::fs::create_dir_all(&dir).unwrap();
+        let export = dir.join("export.json");
+        let sqlite = dir.join("agentos.sqlite");
+
+        let original = populated_clean_state();
+        std::fs::write(&export, serde_json::to_string_pretty(&original).unwrap()).unwrap();
+
+        let backend = SqliteStateBackend::new(&sqlite);
+        import_into_backend(&backend, &export, StateImportMode::Replace, false).unwrap();
+
+        let exported_again = backend.load_state().unwrap();
+
+        // Compared through `to_value` rather than as raw bytes: `Value`
+        // equality ignores key ordering and whitespace, so the test fails for
+        // data that changed and not for formatting that did. It also avoids
+        // deriving `PartialEq` on the stored types purely to suit a test.
+        //
+        // Each collection is sorted first, because row order is not part of
+        // the contract. SQLite returns rows in whatever order it likes absent
+        // an `ORDER BY`, and the state is a set of records keyed by id rather
+        // than a sequence. Asserting on order here would pin a property the
+        // system never promised and would break on any query change.
+        let normalise = |s: &CliState| -> (Vec<String>, Vec<String>, Vec<String>, u32) {
+            let sorted = |v: &serde_json::Value| {
+                let mut items: Vec<String> = v
+                    .as_array()
+                    .expect("collection should serialise as an array")
+                    .iter()
+                    .map(|item| item.to_string())
+                    .collect();
+                items.sort();
+                items
+            };
+            let value = serde_json::to_value(s).unwrap();
+            (
+                sorted(&value["agents"]),
+                sorted(&value["logs"]),
+                sorted(&value["thoughts"]),
+                s.version,
+            )
+        };
+
+        assert_eq!(
+            normalise(&exported_again),
+            normalise(&original),
+            "state changed across export -> import -> export"
+        );
+        assert_eq!(exported_again.version, CURRENT_STATE_VERSION);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_export_without_a_version_key_still_imports() {
+        // The compatibility promise. Every export written before this field
+        // existed has no `version` key, and those files have to keep working.
+        let dir = temp_state_dir("import_unversioned");
+        std::fs::create_dir_all(&dir).unwrap();
+        let export = dir.join("legacy.json");
+        std::fs::write(
+            &export,
+            r#"{"agents":[],"logs":[],"thoughts":[]}"#,
+        )
+        .unwrap();
+
+        let state = read_import_file(&export).expect("a pre-versioning export must still import");
+        assert_eq!(
+            state.version, 1,
+            "an absent version must be read as 1, not as 0"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_export_from_a_newer_build_is_refused_with_both_numbers() {
+        // Refusing is only half of it -- the message has to tell the user what
+        // they have and what this build supports, or they cannot act on it.
+        let dir = temp_state_dir("import_future_version");
+        std::fs::create_dir_all(&dir).unwrap();
+        let export = dir.join("future.json");
+        let future = CURRENT_STATE_VERSION + 1;
+        std::fs::write(
+            &export,
+            format!(r#"{{"version":{future},"agents":[],"logs":[],"thoughts":[]}}"#),
+        )
+        .unwrap();
+
+        let err = read_import_file(&export).expect_err("a newer schema version must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains(&future.to_string()) && msg.contains(&CURRENT_STATE_VERSION.to_string()),
+            "the error should name both versions, got: {msg}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

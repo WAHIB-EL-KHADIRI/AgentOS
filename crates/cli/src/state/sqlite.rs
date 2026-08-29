@@ -152,10 +152,14 @@ pub fn load_state_from_sqlite_path(path: &Path) -> anyhow::Result<CliState> {
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| anyhow::anyhow!("cannot decode SQLite checkpoints: {e}"))?;
 
+    // State read back out of SQLite is exported in the current format, so it
+    // carries the current version rather than inheriting one from whatever
+    // file originally populated the database.
     Ok(CliState {
         agents,
         logs,
         thoughts,
+        ..Default::default()
     })
 }
 
