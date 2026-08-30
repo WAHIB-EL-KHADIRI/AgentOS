@@ -6,7 +6,7 @@ license.workspace = true
 description = "WASM plugin system for sandboxed agent extensions"
 
 [dependencies]
-wasmtime = "47"
+wasmtime = "48"
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
