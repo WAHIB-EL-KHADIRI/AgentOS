@@ -8,7 +8,7 @@ use crate::state::{
     inspect_loaded_state, migrate_json_to_sqlite_paths, migrations, CliState, StateBackend,
     StateBackendKind, StateCleanOptions, StateCleanReport, StateDoctorReport, StateExportReport,
     StateImportMode, StateImportReport, StateInspectReport, StateMigrationReport, StoredAgentEntry,
-    StoredLogEntry,
+    StoredLogEntry, CURRENT_STATE_VERSION,
 };
 
 pub struct SqliteStateBackend {
@@ -153,6 +153,7 @@ pub fn load_state_from_sqlite_path(path: &Path) -> anyhow::Result<CliState> {
         .map_err(|e| anyhow::anyhow!("cannot decode SQLite checkpoints: {e}"))?;
 
     Ok(CliState {
+        version: CURRENT_STATE_VERSION,
         agents,
         logs,
         thoughts,
