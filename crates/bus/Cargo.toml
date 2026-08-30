@@ -21,7 +21,7 @@ hyper = { workspace = true, features = ["server", "client", "http1", "http2"] }
 hyper-util = { workspace = true, features = ["client", "tokio"] }
 prost.workspace = true
 bytes = "1"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.30"
 futures-util = "0.3"
 
 [lints]
