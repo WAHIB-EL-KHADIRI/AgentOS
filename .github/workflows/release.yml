@@ -60,7 +60,13 @@ jobs:
       # Installing it into `stable` instead leaves `cargo build --target
       # aarch64-*` failing with the target missing the moment stable moves
       # past the pin.
+      # `shell: bash` is required, not cosmetic: without it the Windows runner
+      # runs this in PowerShell, where `"$TARGET"` is a literal string rather
+      # than the environment variable, so rustup is asked for target '' and the
+      # job fails. The env indirection stays -- matrix.target is trusted here,
+      # but the pattern is what keeps `run:` bodies free of expansions.
       - name: Add the target to the pinned toolchain
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: rustup target add "$TARGET"
@@ -112,11 +118,11 @@ jobs:
           Compress-Archive -Path dist/* -DestinationPath "agentOS-$env:REF_NAME-$env:TARGET.zip"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: agentOS-${{ github.ref_name }}-${{ matrix.target }}.*
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: agentOS-${{ matrix.target }}
           path: agentOS-${{ github.ref_name }}-${{ matrix.target }}.*
@@ -151,7 +157,7 @@ jobs:
         run: test -f "docs/releases/$REF_NAME.md"
 
       - name: Create Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: |
             agentOS-*
@@ -178,7 +184,7 @@ jobs:
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}

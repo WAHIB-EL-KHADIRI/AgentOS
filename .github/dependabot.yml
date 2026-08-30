@@ -89,3 +89,12 @@ updates:
     labels:
       - dependencies
       - security
+    # Node's odd-numbered majors never become LTS, so an unattended major
+    # bump can move the image off a supported line - which is how this
+    # Dockerfile ended up on 26. Majors are a deliberate choice here.
+    # Patch and minor updates still flow, and those are what carry the
+    # CVE fixes this ecosystem was added for.
+    ignore:
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
