@@ -226,8 +226,11 @@ agentOS state import --input backup.json --merge
 agentOS state import --input backup.json --replace
 ```
 
-Exports and imports state before SQLite persistence. `--replace` creates an
-automatic backup of the current state before writing.
+SQLite is the default state backend. JSON is the portable export/import backup
+format, and exported JSON carries a portable format version. Older backups
+without `version` are treated as version 1, while imports from a newer
+portable format version than this binary supports are rejected. `--replace`
+creates an automatic backup of the current state before writing.
 
 ```bash
 agentOS state clean --status completed --dry-run

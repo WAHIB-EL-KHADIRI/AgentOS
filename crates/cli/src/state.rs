@@ -19,6 +19,14 @@ pub use sqlite::{load_state_from_sqlite_path, sqlite_schema_version_at, SqliteSt
 
 static STATE_BACKEND_KIND: OnceLock<Mutex<StateBackendKind>> = OnceLock::new();
 
+/// The version this build writes.
+pub const CURRENT_STATE_VERSION: u32 = 1;
+
+/// Exports written before the version field existed. Permanently 1.
+const LEGACY_STATE_VERSION: u32 = 1;
+
+const _: () = assert!(LEGACY_STATE_VERSION == 1);
+
 fn state_backend_kind_cell() -> &'static Mutex<StateBackendKind> {
     STATE_BACKEND_KIND.get_or_init(|| Mutex::new(StateBackendKind::from_env()))
 }
@@ -42,11 +50,28 @@ pub struct StoredAgentEntry {
     pub updated_at_ms: u64,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliState {
+    #[serde(default = "default_state_version")]
+    version: u32,
     agents: Vec<StoredAgentEntry>,
     logs: Vec<StoredLogEntry>,
     thoughts: Vec<RecordedThought>,
+}
+
+fn default_state_version() -> u32 {
+    LEGACY_STATE_VERSION
+}
+
+impl Default for CliState {
+    fn default() -> Self {
+        Self {
+            version: CURRENT_STATE_VERSION,
+            agents: Vec::new(),
+            logs: Vec::new(),
+            thoughts: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -710,8 +735,16 @@ pub fn import_state_to_path(
 fn read_import_file(input: &Path) -> anyhow::Result<CliState> {
     let content = std::fs::read_to_string(input)
         .map_err(|e| anyhow::anyhow!("cannot read import file '{}': {e}", input.display()))?;
-    serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("invalid state import file '{}': {e}", input.display()))
+    let state: CliState = serde_json::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("invalid state import file '{}': {e}", input.display()))?;
+    if state.version > CURRENT_STATE_VERSION {
+        anyhow::bail!(
+            "state export version {} is newer than supported version {}",
+            state.version,
+            CURRENT_STATE_VERSION
+        );
+    }
+    Ok(state)
 }
 
 fn merge_imported_state(
@@ -1030,6 +1063,14 @@ mod tests {
     }
 
     #[test]
+    fn default_state_uses_current_portable_version() {
+        let state = CliState::default();
+
+        assert_eq!(state.version, CURRENT_STATE_VERSION);
+        assert_eq!(state_counts(&state), (0, 0, 0));
+    }
+
+    #[test]
     fn state_round_trips_to_disk() {
         let path =
             std::env::temp_dir().join(format!("agentos_cli_state_{}.json", current_time_millis()));
@@ -1265,6 +1306,57 @@ mod tests {
     }
 
     #[test]
+    fn legacy_import_without_version_is_treated_as_version_one() {
+        let dir = temp_state_dir("legacy_import");
+        let input = dir.join("legacy-backup.json");
+        let sqlite = dir.join("agentos.sqlite");
+        let state = deterministic_state();
+        let mut legacy = serde_json::to_value(&state).unwrap();
+        legacy.as_object_mut().unwrap().remove("version");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&input, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+
+        let imported = read_import_file(&input).unwrap();
+        let backend = SqliteStateBackend::new(&sqlite);
+        let report = backend
+            .import_state(&input, StateImportMode::Merge, false)
+            .unwrap();
+        let loaded = backend.load_state().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(imported.version, LEGACY_STATE_VERSION);
+        assert_eq!(report.imported_agents, 1);
+        assert_eq!(state_counts(&loaded), (1, 1, 1));
+        assert_eq!(loaded.version, CURRENT_STATE_VERSION);
+    }
+
+    #[test]
+    fn future_portable_version_is_rejected_before_sqlite_is_created() {
+        let dir = temp_state_dir("future_import");
+        let input = dir.join("future-backup.json");
+        let sqlite = dir.join("agentos.sqlite");
+        let state = deterministic_state();
+        let future_version = CURRENT_STATE_VERSION + 1;
+        let mut future = serde_json::to_value(&state).unwrap();
+        future
+            .as_object_mut()
+            .unwrap()
+            .insert("version".to_string(), serde_json::json!(future_version));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&input, serde_json::to_vec_pretty(&future).unwrap()).unwrap();
+
+        let backend = SqliteStateBackend::new(&sqlite);
+        let result = backend.import_state(&input, StateImportMode::Replace, false);
+        let error = result.unwrap_err().to_string();
+        let target_exists = sqlite.exists();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(error.contains(&future_version.to_string()));
+        assert!(error.contains(&CURRENT_STATE_VERSION.to_string()));
+        assert!(!target_exists);
+    }
+
+    #[test]
     fn inspect_current_state_file() {
         let dir = temp_state_dir("inspect_current");
         let path = dir.join("cli-state.json");
@@ -1492,6 +1584,34 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_backend_round_trips_portable_json() {
+        let dir = temp_state_dir("sqlite_round_trip");
+        let input = dir.join("before.json");
+        let sqlite = dir.join("agentos.sqlite");
+        let output = dir.join("after.json");
+        let state = deterministic_state();
+
+        export_state_to_path(&state, &input, true).unwrap();
+        let backend = SqliteStateBackend::new(&sqlite);
+        let report = backend
+            .import_state(&input, StateImportMode::Merge, false)
+            .unwrap();
+        backend.export_state(&output, true).unwrap();
+        let before: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&input).unwrap()).unwrap();
+        let after: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&output).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(report.imported_agents, 1);
+        assert_eq!(report.imported_logs, 1);
+        assert_eq!(report.imported_checkpoints, 1);
+        assert_eq!(before["version"], serde_json::json!(CURRENT_STATE_VERSION));
+        assert_eq!(after["version"], serde_json::json!(CURRENT_STATE_VERSION));
+        assert_eq!(before, after);
+    }
+
+    #[test]
     fn sqlite_import_dry_run_does_not_write() {
         let dir = temp_state_dir("sqlite_import_dry_run");
         let sqlite = dir.join("agentos.sqlite");
@@ -1637,6 +1757,37 @@ mod tests {
             new_checkpoint(agent_id, format!("{agent_id} checkpoint"), timestamp_ms),
         );
         state
+    }
+
+    fn deterministic_state() -> CliState {
+        CliState {
+            version: CURRENT_STATE_VERSION,
+            agents: vec![StoredAgentEntry {
+                agent_id: "agent_round_trip".to_string(),
+                name: "Round Trip Agent".to_string(),
+                config_path: "round-trip.toml".to_string(),
+                state: "completed".to_string(),
+                started_at_ms: 100,
+                updated_at_ms: 200,
+            }],
+            logs: vec![StoredLogEntry {
+                agent_id: "agent_round_trip".to_string(),
+                event_type: "completed".to_string(),
+                message: "Round trip complete".to_string(),
+                timestamp_ms: 300,
+            }],
+            thoughts: vec![RecordedThought {
+                checkpoint_id: "checkpoint_round_trip".to_string(),
+                agent_id: "agent_round_trip".to_string(),
+                content: "Round trip checkpoint".to_string(),
+                timestamp_ms: 400,
+                parent_checkpoint_id: Some("checkpoint_parent".to_string()),
+                metadata: std::collections::HashMap::from([(
+                    "source".to_string(),
+                    "round-trip-test".to_string(),
+                )]),
+            }],
+        }
     }
 
     fn temp_state_dir(name: &str) -> PathBuf {
