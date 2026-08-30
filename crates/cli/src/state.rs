@@ -19,7 +19,13 @@ pub use sqlite::{load_state_from_sqlite_path, sqlite_schema_version_at, SqliteSt
 
 static STATE_BACKEND_KIND: OnceLock<Mutex<StateBackendKind>> = OnceLock::new();
 
+/// The version this build writes.
 pub const CURRENT_STATE_VERSION: u32 = 1;
+
+/// Exports written before the version field existed. Permanently 1.
+const LEGACY_STATE_VERSION: u32 = 1;
+
+const _: () = assert!(LEGACY_STATE_VERSION == 1);
 
 fn state_backend_kind_cell() -> &'static Mutex<StateBackendKind> {
     STATE_BACKEND_KIND.get_or_init(|| Mutex::new(StateBackendKind::from_env()))
@@ -54,7 +60,7 @@ pub struct CliState {
 }
 
 fn default_state_version() -> u32 {
-    CURRENT_STATE_VERSION
+    LEGACY_STATE_VERSION
 }
 
 impl Default for CliState {
@@ -1300,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_import_without_version_is_treated_as_current_version() {
+    fn legacy_import_without_version_is_treated_as_version_one() {
         let dir = temp_state_dir("legacy_import");
         let input = dir.join("legacy-backup.json");
         let sqlite = dir.join("agentos.sqlite");
@@ -1318,7 +1324,7 @@ mod tests {
         let loaded = backend.load_state().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
 
-        assert_eq!(imported.version, CURRENT_STATE_VERSION);
+        assert_eq!(imported.version, LEGACY_STATE_VERSION);
         assert_eq!(report.imported_agents, 1);
         assert_eq!(state_counts(&loaded), (1, 1, 1));
         assert_eq!(loaded.version, CURRENT_STATE_VERSION);
