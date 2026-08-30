@@ -185,7 +185,7 @@ impl WsServer {
                                 }).unwrap_or_default();
                                 let _ = client
                                     .sender
-                                    .send(tokio_tungstenite::tungstenite::Message::Text(msg))
+                                    .send(tokio_tungstenite::tungstenite::Message::Text(msg.into()))
                                     .await;
                             }
                         }
