@@ -152,12 +152,12 @@ so pin the tag when using the one-liner installers:
 
 ```bash
 # Linux / macOS
-AGENTOS_VERSION=v0.1.0-alpha.2 curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.sh | sh
+AGENTOS_VERSION=v0.1.0-alpha.3 curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.sh | sh
 ```
 
 ```powershell
 # Windows
-$env:AGENTOS_VERSION="v0.1.0-alpha.2"; iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.ps1 | iex
+$env:AGENTOS_VERSION="v0.1.0-alpha.3"; iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.ps1 | iex
 ```
 
 Building from source remains the most reliable path for contributors.

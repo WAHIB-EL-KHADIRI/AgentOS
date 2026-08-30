@@ -60,7 +60,13 @@ jobs:
       # Installing it into `stable` instead leaves `cargo build --target
       # aarch64-*` failing with the target missing the moment stable moves
       # past the pin.
+      # `shell: bash` is required, not cosmetic: without it the Windows runner
+      # runs this in PowerShell, where `"$TARGET"` is a literal string rather
+      # than the environment variable, so rustup is asked for target '' and the
+      # job fails. The env indirection stays -- matrix.target is trusted here,
+      # but the pattern is what keeps `run:` bodies free of expansions.
       - name: Add the target to the pinned toolchain
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: rustup target add "$TARGET"
