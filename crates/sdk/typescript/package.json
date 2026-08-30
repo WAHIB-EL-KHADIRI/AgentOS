@@ -38,6 +38,6 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "eventsource": "^4.1.0"
+    "eventsource": "^5.1.1"
   }
 }
