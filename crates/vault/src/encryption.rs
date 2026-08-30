@@ -70,14 +70,16 @@ impl VaultEncryption {
         sys_rng
             .try_fill_bytes(&mut nonce_bytes)
             .expect("SysRng failure: system entropy source unavailable");
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        // `nonce_bytes` is statically NONCE_LEN long, which is exactly the
+        // nonce size for AES-256-GCM, so this conversion cannot fail.
+        let nonce = Nonce::from(nonce_bytes);
 
         let ciphertext = cipher
-            .encrypt(nonce, plaintext)
+            .encrypt(&nonce, plaintext)
             .map_err(|e| VaultError::Encryption(e.to_string()))?;
 
         let mut result = Vec::with_capacity(NONCE_LEN + ciphertext.len());
-        result.extend_from_slice(nonce);
+        result.extend_from_slice(&nonce_bytes);
         result.extend_from_slice(&ciphertext);
         Ok(result)
     }
@@ -89,13 +91,14 @@ impl VaultEncryption {
         }
 
         let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = Nonce::try_from(nonce_bytes)
+            .map_err(|_| VaultError::Encryption("invalid nonce".into()))?;
 
         let cipher = Aes256Gcm::new_from_slice(&self.key)
             .map_err(|e| VaultError::Encryption(e.to_string()))?;
 
         cipher
-            .decrypt(nonce, ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|_| VaultError::Encryption("decryption failed".into()))
     }
 
@@ -228,5 +231,32 @@ mod tests {
         let enc = VaultEncryption::new();
         let result = enc.decrypt(b"too short");
         assert!(result.is_err());
+    }
+
+    /// Guards the on-disk format across dependency upgrades.
+    ///
+    /// This blob was produced by `encrypt` when the crate was built against
+    /// aes-gcm 0.10, before the 0.11 upgrade moved `Nonce` onto `hybrid_array`
+    /// and deprecated `from_slice`. An existing vault must stay readable, so
+    /// this must keep decrypting: `nonce || ciphertext` with AES-256-GCM.
+    #[test]
+    fn test_decrypts_blob_written_by_aes_gcm_0_10() {
+        let hex_key = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let blob = hex::decode(concat!(
+            "3f733c1ec63db63cbfdf6b552c069beea0f580720279a0227b8608f82d5068be",
+            "1a42c25d087fc1fa6f11984bd21eca2768",
+        ))
+        .unwrap();
+        let enc = VaultEncryption::from_hex(hex_key).unwrap();
+        assert_eq!(enc.decrypt(&blob).unwrap(), b"agentos golden vector");
+    }
+
+    #[test]
+    fn test_decrypt_rejects_tampered_ciphertext() {
+        let enc = VaultEncryption::new();
+        let mut blob = enc.encrypt(b"secret").unwrap();
+        let last = blob.len() - 1;
+        blob[last] ^= 0x01;
+        assert!(enc.decrypt(&blob).is_err());
     }
 }
