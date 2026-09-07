@@ -1,0 +1,36 @@
+name: DCO
+
+# Enforces the Developer Certificate of Origin sign-off required by
+# .github/CLA.md on every commit a pull request introduces.
+#
+# Deliberately triggered by `pull_request`, never `pull_request_target`:
+# this job reads a fork's commit messages, and pull_request_target would run
+# that untrusted branch against the base repository's secrets and write
+# token. Nothing here needs either, so nothing here gets either.
+on:
+  pull_request:
+    branches: [main]
+
+# Least privilege: the check only reads commit metadata.
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    name: dco
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history so the merge base with the target branch resolves.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify Signed-off-by trailers
+        # SHAs are passed through the environment rather than interpolated
+        # into the script body, so no workflow expression is ever evaluated
+        # as shell.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check-dco.sh "$BASE_SHA" "$HEAD_SHA"
