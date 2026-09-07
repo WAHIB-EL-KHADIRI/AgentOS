@@ -1,9 +1,11 @@
 # Funding configuration for AgentOS
 # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button
+#
+# GitHub Sponsors is intentionally not listed: it requires Stripe Connect,
+# which is not available in the maintainer's country. A sponsor button that
+# cannot receive money is worse than none.
+#
+# AgentOS is funded by the commercial Enterprise Edition and by support
+# contracts, not by donations. The link below is the real path.
 
-github: WAHIB-EL-KHADIRI
-# patreon: # Replace with your Patreon
-# open_collective: # Replace with your Open Collective
-# ko_fi: # Replace with your Ko-fi
-# tidelift: # Replace with your Tidelift
-# custom: # Replace with custom URLs
+custom: https://github.com/WAHIB-EL-KHADIRI/AgentOS/blob/main/docs/editions.md
