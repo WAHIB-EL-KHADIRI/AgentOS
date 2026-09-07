@@ -37,12 +37,17 @@ Fixes #(issue)
 
 ## Contributor Licence Agreement
 
-- [ ] I have read the [CLA](CLA.md) and every commit in this PR is signed off
-      (`git commit -s`)
+- [ ] Every commit in this PR is signed off (`git commit -s`) — enforced by the
+      `dco` check
+- [ ] **First contribution only:** I have commented on this PR agreeing to the
+      [CLA](CLA.md), and understand it will be recorded in
+      [`cla-signatures.md`](cla-signatures.md)
 
-The CLA is short. You keep the copyright to your work; it grants the project
+The sign-off is the Developer Certificate of Origin: it certifies the work is
+yours to submit. Agreeing to the CLA is a separate, one-time step — it grants
 the right to ship your contribution in both the Apache-2.0 core and the
-commercial edition. See [CONTRIBUTING.md](../CONTRIBUTING.md#licensing-of-contributions).
+commercial edition. You keep the copyright to your work either way.
+See [CONTRIBUTING.md](../CONTRIBUTING.md#licensing-of-contributions).
 
 ## Additional Context
 

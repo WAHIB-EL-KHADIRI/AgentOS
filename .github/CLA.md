@@ -117,10 +117,31 @@ does not entitle You to compensation.
 
 ---
 
-## How to sign
+## How to accept
 
-You accept this agreement by adding a `Signed-off-by` trailer to every commit
-in your pull request:
+There are two separate requirements. They mean different things, and one does
+not substitute for the other.
+
+### 1. Agree to this CLA — once, in your first pull request
+
+Post this sentence as a comment on your first pull request:
+
+```
+I have read the AgentOS Contributor Licence Agreement (CLA v1.0)
+and I agree to it.
+```
+
+The maintainer records your GitHub username, the pull request, and the date in
+[`cla-signatures.md`](cla-signatures.md). That file is the project's record of
+who has accepted, and which version they accepted. You do this once, not per
+pull request.
+
+If you are contributing on behalf of a company, say so in the same comment and
+name the company.
+
+### 2. Sign off every commit — the Developer Certificate of Origin
+
+Add a `Signed-off-by` trailer to every commit:
 
 ```
 git commit -s -m "feat(kernel): add supervision backoff"
@@ -132,16 +153,33 @@ which appends:
 Signed-off-by: Your Name <your.email@example.com>
 ```
 
-By signing off, you certify that you have read this agreement, that you agree
-to it, and that you have the right to submit the work under it. Use your real
-name and an email address you control.
-
-Configure git once so this is automatic:
+Use your real name and an email address you control. Configure git once so it
+is automatic:
 
 ```
 git config user.name  "Your Name"
 git config user.email "your.email@example.com"
 ```
+
+This is checked automatically by CI on every pull request, and only against
+the commits that pull request introduces.
+
+### Why both, and why they are not the same thing
+
+The `Signed-off-by` trailer is the **Developer Certificate of Origin**. It
+certifies one thing: that you wrote the work, or otherwise have the right to
+submit it. That is its settled, widely understood meaning across the free
+software world, and this project does not redefine it.
+
+The DCO contains **no licence grant beyond the project's own licence.** It
+does not, and cannot, express the sublicensing permission in section 2 above —
+the permission that lets a contribution ship in the commercial edition.
+
+So a signed-off commit is not, by itself, agreement to this CLA. That is why
+step 1 exists and is recorded separately and explicitly. Being asked for a
+plain sentence rather than having it inferred from a git trailer is the
+honest way round: you should know what you agreed to, and the project should
+be able to show that you did.
 
 ## Questions
 

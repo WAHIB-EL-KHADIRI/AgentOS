@@ -43,24 +43,43 @@ In summary:
   permit only the first, which is why the agreement exists.
 - You confirm the work is yours to submit.
 
-### Signing
+### Two steps, and they are not the same thing
 
-Sign off every commit in your pull request:
+**1. Agree to the CLA — once.** Comment on your first pull request:
+
+> I have read the AgentOS Contributor Licence Agreement (CLA v1.0) and I agree to it.
+
+Your username and the date are recorded in
+[`.github/cla-signatures.md`](.github/cla-signatures.md). Once, not per PR.
+
+**2. Sign off every commit — the Developer Certificate of Origin.**
 
 ```bash
 git commit -s -m "feat(kernel): add supervision backoff"
 ```
 
-This appends a `Signed-off-by:` trailer certifying that you have read and
-agree to the CLA. Set it up once:
+Set your identity once so the trailer always matches your commits:
 
 ```bash
 git config user.name  "Your Name"
 git config user.email "your.email@example.com"
 ```
 
-Forgot to sign off? `git commit --amend -s` for a single commit, or
-`git rebase --signoff main` for a branch, then force-push your branch.
+CI enforces this on every pull request, checking **only** the commits that
+pull request introduces. Existing history is never examined. Check locally
+before pushing:
+
+```bash
+bash scripts/check-dco.sh
+```
+
+Forgot to sign off? `git commit --amend -s --no-edit` for a single commit, or
+`git rebase --signoff origin/main` for a branch, then push again.
+
+The `Signed-off-by` trailer is the Developer Certificate of Origin: it
+certifies that the work is yours to submit. It carries **no licence grant on
+its own**, which is why agreeing to the CLA is a separate, explicit step
+rather than something inferred from a git trailer.
 
 If your employer's policy conflicts with the CLA, open a discussion before
 writing code — there is usually a way through, and it is much easier to sort
