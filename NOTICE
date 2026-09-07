@@ -6,21 +6,46 @@ https://github.com/WAHIB-EL-KHADIRI
 
 This product includes software developed by WAHIB EL KHADIRI and contributors.
 
-Licensed under either of
-  - MIT License        (see LICENSE-MIT)
-  - Apache License 2.0 (see LICENSE-APACHE)
-at your option.
+LICENCE
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License in the LICENSE file distributed with this work, or at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+The Apache-2.0 grant for each released version is irrevocable.
+
+Releases up to and including v0.1.0-alpha.3 were published under
+"MIT OR Apache-2.0". That dual grant is not revoked and continues to apply to
+those versions. LICENSE-MIT is retained solely as the record of that historical
+grant; it does not apply to current releases.
+
+OPEN CORE
+
+This repository is the AgentOS Community Edition, and it is entirely
+Apache-2.0. A separate Enterprise Edition -- covering multi-tenancy, RBAC/SSO,
+hosted trace storage, audit logging, fleet analytics, and commercial support --
+is offered under a proprietary licence and is NOT part of this repository.
+
+See docs/editions.md for the boundary and LICENSING.md for the terms.
 
 TRADEMARKS
 
 The names "AgentOS" and "agentOS", the project identity, and the associated
-branding are trademarks of WAHIB EL KHADIRI and are NOT licensed under the MIT
-or Apache-2.0 licences. Apache License 2.0 section 6 explicitly excludes
-trademark rights from the grant.
+branding are trademarks of WAHIB EL KHADIRI and are NOT licensed under
+Apache-2.0. Copyright licences do not grant trademark rights: Apache License
+2.0 section 6 excludes them explicitly.
 
 Permitted without asking:
-  - Using, modifying, and redistributing the code, including commercially,
-    under the licence terms.
+  - Using, modifying, and redistributing the code under the licence terms,
+    including commercially and including inside closed-source products.
+  - Forking the project under a different name.
   - Factual references such as "built on AgentOS" or "compatible with AgentOS".
 
 Not permitted without written permission from the author:
@@ -32,5 +57,12 @@ Not permitted without written permission from the author:
 ATTRIBUTION
 
 Redistributions in source or binary form must retain this NOTICE file, the
-copyright statement above, and the licence texts, as required by the Apache
+copyright statement above, and the licence text, as required by the Apache
 License 2.0 section 4.
+
+CONTRIBUTIONS
+
+Contributions are accepted under the Contributor Licence Agreement in
+.github/CLA.md, signed with a "Signed-off-by" trailer. Contributors retain
+copyright in their work and grant a licence broad enough to permit
+distribution in both the open-source core and the commercial edition.

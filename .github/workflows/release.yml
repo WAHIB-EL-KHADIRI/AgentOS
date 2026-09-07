@@ -102,7 +102,7 @@ jobs:
         run: |
           mkdir -p dist
           cp "target/$TARGET/release/agentOS" dist/
-          cp README.md LICENSE-MIT LICENSE-APACHE dist/
+          cp README.md LICENSE NOTICE dist/
           cd dist && tar czf "../agentOS-$REF_NAME-$TARGET.tar.gz" *
 
       - name: Package (Windows)
@@ -114,7 +114,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           Copy-Item -Path "target/$env:TARGET/release/agentOS.exe" -Destination dist/
-          Copy-Item -Path README.md,LICENSE-MIT,LICENSE-APACHE -Destination dist/
+          Copy-Item -Path README.md,LICENSE,NOTICE -Destination dist/
           Compress-Archive -Path dist/* -DestinationPath "agentOS-$env:REF_NAME-$env:TARGET.zip"
 
       - name: Attest build provenance

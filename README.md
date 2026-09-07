@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.94%2B-orange" alt="Rust 1.94+"></a>
-  <a href="#license"><img src="https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue" alt="License: MIT OR Apache-2.0"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <a href="https://github.com/WAHIB-EL-KHADIRI/AgentOS/actions/workflows/ci.yml"><img src="https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/WAHIB-EL-KHADIRI/AgentOS"><img src="https://api.scorecard.dev/projects/github.com/WAHIB-EL-KHADIRI/AgentOS/badge" alt="OpenSSF Scorecard"></a>
   <a href="scripts/check.ps1"><img src="https://img.shields.io/badge/windows-supported-blue" alt="Windows supported"></a>
@@ -332,6 +332,8 @@ aligned with the roadmap.
 - Glossary: [`docs/project-glossary.md`](docs/project-glossary.md)
 - Pitch: [`docs/pitch.md`](docs/pitch.md)
 - Roadmap: [`ROADMAP.md`](ROADMAP.md)
+- Editions (Open Core boundary): [`docs/editions.md`](docs/editions.md)
+- Licensing: [`LICENSING.md`](LICENSING.md)
 
 ## Ownership
 
@@ -350,26 +352,48 @@ copyright of the original work stay with the author; see [`AUTHORS`](AUTHORS),
 
 **The code is open source. The name is not.** The marks *AgentOS* and *agentOS*,
 the project identity, and the associated branding are reserved by the author and
-are **not** granted by the MIT or Apache-2.0 licence. Those licences cover
-copyright and patents — never trademarks (see Apache-2.0 §6).
+are **not** granted by the Apache-2.0 licence, which covers copyright and
+patents — never trademarks (see Apache-2.0 §6).
 
 This means anyone may use, fork, and build on the code, including commercially.
 Nobody may present a fork, product, or service **as AgentOS**, imply it is the
 official project, or use the name in a way that suggests endorsement by the
-author. For any use of the name beyond plain factual reference
-("built on AgentOS"), ask first.
+author. Fork freely — just give your fork its own name.
 
-Contributions are accepted under the project's licence terms
-([`CONTRIBUTING.md`](CONTRIBUTING.md)), which keeps the licensing history of the
-project clean and under the maintainer's control.
+Contributions are accepted under the
+[Contributor Licence Agreement](.github/CLA.md). Contributors keep copyright in
+their own work; the agreement grants the project the right to ship it in both
+the open-source core and the commercial edition.
+
+## Editions
+
+AgentOS is **Open Core**.
+
+| | Licence | Cost | Status |
+|---|---|---|---|
+| **Community** — this repository | Apache-2.0 | Free, forever | Shipping |
+| **Enterprise** — multi-tenancy, RBAC/SSO, hosted traces, audit, fleet analytics, support | Proprietary | Contact | In development |
+
+Everything you need to build, run, and debug agents is Community — including
+deterministic replay, the headline feature. It is not a limited edition: no
+licence key, no seat count, no expiry, no telemetry. Enterprise is additive and
+targets organisations operating fleets of agents.
+
+Enterprise capabilities plug into extension traits exported from the
+open-source core — `TraceStore`, `PermissionSet`, `AgentHooks`,
+`PluginRegistry` — so you can always implement your own instead.
+
+Full boundary and rationale: [`docs/editions.md`](docs/editions.md)
 
 ## License
 
-Licensed under either of:
+Licensed under the [Apache License, Version 2.0](LICENSE).
 
-- [`MIT License`](LICENSE-MIT)
-- [`Apache License, Version 2.0`](LICENSE-APACHE)
+The grant for every released version is irrevocable. Releases up to and
+including v0.1.0-alpha.3 were published under `MIT OR Apache-2.0`; that dual
+grant still applies to those versions, and [`LICENSE-MIT`](LICENSE-MIT) is
+retained solely as its record.
 
-at your option.
+Details, including commercial licensing: [`LICENSING.md`](LICENSING.md)
 
 Copyright (c) 2026 WAHIB EL KHADIRI and contributors.

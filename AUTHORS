@@ -8,6 +8,15 @@ AgentOS was created and is owned by:
 # Contributors
 
 This file lists people who have contributed code to AgentOS.
-By contributing, you agree your work is licensed under the project's
-dual MIT OR Apache-2.0 license (see LICENSE-MIT and LICENSE-APACHE),
-with copyright attributed as above.
+
+Contributions are accepted under the Contributor Licence Agreement in
+.github/CLA.md, signed with a "Signed-off-by" trailer (git commit -s).
+
+Contributors retain the copyright in their own work. The agreement grants a
+licence broad enough for the project to distribute contributions in both the
+Apache-2.0 open-source core and the commercial edition. It is a licence, not
+an assignment: you remain free to use your own contribution elsewhere on any
+terms.
+
+Contributions made before the adoption of the CLA were submitted under the
+project's then-current dual "MIT OR Apache-2.0" terms.

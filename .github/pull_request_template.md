@@ -35,6 +35,15 @@ Fixes #(issue)
 - [ ] I have added an entry to CHANGELOG.md if appropriate
 - [ ] Any dependent changes have been merged
 
+## Contributor Licence Agreement
+
+- [ ] I have read the [CLA](CLA.md) and every commit in this PR is signed off
+      (`git commit -s`)
+
+The CLA is short. You keep the copyright to your work; it grants the project
+the right to ship your contribution in both the Apache-2.0 core and the
+commercial edition. See [CONTRIBUTING.md](../CONTRIBUTING.md#licensing-of-contributions).
+
 ## Additional Context
 
 Add any other context about the pull request here.

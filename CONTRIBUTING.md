@@ -10,6 +10,7 @@ identity, and technical direction.
 ## Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
+- [Licensing of Contributions](#licensing-of-contributions)
 - [Before You Start](#before-you-start)
 - [Development Setup](#development-setup)
 - [Project Architecture](#project-architecture)
@@ -22,6 +23,48 @@ identity, and technical direction.
 
 Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md). We are
 committed to providing a welcoming and inclusive environment.
+
+## Licensing of Contributions
+
+AgentOS is [Open Core](docs/editions.md): the core is Apache-2.0 open source,
+and a separate commercial edition funds the work.
+
+Contributions are accepted under the
+**[Contributor Licence Agreement](.github/CLA.md)**. Read it once before your
+first pull request — it is short.
+
+In summary:
+
+- **You keep the copyright to your work.** The CLA is a licence, not an
+  assignment. You stay free to use your own contribution anywhere else, on any
+  terms, without asking.
+- You grant the project the right to ship your contribution in **both** the
+  Apache-2.0 core and the commercial edition. A plain inbound licence would
+  permit only the first, which is why the agreement exists.
+- You confirm the work is yours to submit.
+
+### Signing
+
+Sign off every commit in your pull request:
+
+```bash
+git commit -s -m "feat(kernel): add supervision backoff"
+```
+
+This appends a `Signed-off-by:` trailer certifying that you have read and
+agree to the CLA. Set it up once:
+
+```bash
+git config user.name  "Your Name"
+git config user.email "your.email@example.com"
+```
+
+Forgot to sign off? `git commit --amend -s` for a single commit, or
+`git rebase --signoff main` for a branch, then force-push your branch.
+
+If your employer's policy conflicts with the CLA, open a discussion before
+writing code — there is usually a way through, and it is much easier to sort
+out before the work exists than after.
 
 ## Before You Start
 
