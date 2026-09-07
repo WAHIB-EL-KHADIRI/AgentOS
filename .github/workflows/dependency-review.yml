@@ -1,7 +1,15 @@
 name: Dependency Review
 
-# Informational supply-chain check: surfaces vulnerable/newly-added dependencies
-# in a PR summary comment. warn-only => never blocks merges (zero friction).
+# Blocking supply-chain gate: fails a pull request that introduces a dependency
+# with a known critical vulnerability, and summarises every dependency change
+# in a PR comment.
+#
+# This check is required by branch protection on main. It was previously
+# warn-only, which meant it reported findings but always reported success --
+# a required check that can never fail protects nothing.
+#
+# The severity policy is deliberately left at `critical`. Enforcement and
+# policy are separate decisions; tightening the threshold is its own change.
 on:
   pull_request:
     branches: [main]
@@ -21,6 +29,6 @@ jobs:
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
-          warn-only: true
+          warn-only: false
           fail-on-severity: critical
           comment-summary-in-pr: always
