@@ -25,7 +25,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/WAHIB-EL-KHADIRI/agentOS"
-authors = ["WAHIB EL KHADIRI <wahibmaxim@gmail.com>"]
+authors = ["WAHIB EL KHADIRI <wahibelkhadirii@gmail.com>"]
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
