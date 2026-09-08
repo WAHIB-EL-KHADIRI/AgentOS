@@ -5,6 +5,70 @@ All notable changes to AgentOS will be documented in this file.
 The format follows a simple versioned history. Public alpha releases should be
 honest about what works, what is experimental, and what is not ready yet.
 
+Per-release notes for the published alpha tags live in
+[`docs/releases/`](docs/releases/): `v0.1.0-alpha.1`, `v0.1.0-alpha.2`, and
+`v0.1.0-alpha.3` are documented there rather than in this file.
+
+## Unreleased
+
+### Licence — read this before upgrading
+
+**The licence changed from `MIT OR Apache-2.0` to `Apache-2.0`.** If you rely on
+the MIT option, this affects you.
+
+- The project is now licensed solely under the
+  [Apache License 2.0](LICENSE). Apache-2.0 carries an express patent grant, an
+  explicit trademark carve-out (§6), and an attribution requirement (§4), none
+  of which MIT provides.
+- **Releases up to and including `v0.1.0-alpha.3` keep the dual
+  `MIT OR Apache-2.0` grant.** That grant is permanent for those versions and is
+  not revoked. `LICENSE-MIT` is retained solely as its record.
+- Narrowing an `OR` grant needs no contributor consent — contributors granted
+  either licence, and the project is exercising the choice they gave.
+- **`LICENSE` now contains the verbatim Apache-2.0 text.** The file previously
+  shipped was a reflowed paraphrase with clauses missing, including the
+  contributor warranty disclaimer in §7 and the enumeration of covered damages
+  in §8. It was not the Apache License 2.0.
+- `NOTICE` is now shipped in release artifacts, as Apache-2.0 §4 requires. It
+  never was before.
+
+### Open Core
+
+- Added [`docs/editions.md`](docs/editions.md) and [`LICENSING.md`](LICENSING.md)
+  defining the Community/Enterprise boundary. Every Enterprise capability listed
+  there is stated as **in development and not purchasable**; nothing is
+  presented as shipping.
+- The core stays Apache-2.0. No feature is removed from Community to create
+  Enterprise.
+
+### Contributing
+
+- Added a [Contributor Licence Agreement](.github/CLA.md), accepted once per
+  contributor and recorded in `.github/cla-signatures.md`. Contributors keep
+  copyright in their own work; the agreement grants the right to ship a
+  contribution in both editions.
+- **Every commit in a pull request must now carry a `Signed-off-by` trailer**
+  (`git commit -s`), enforced by the `dco` check. Only commits the pull request
+  introduces are examined, so existing history is unaffected. Run
+  `bash scripts/check-dco.sh` locally before pushing.
+- The sign-off is the Developer Certificate of Origin and is **not** by itself
+  agreement to the CLA; the two are separate and documented as such.
+
+### CI and supply chain
+
+- `dependency-review` now blocks on critical vulnerabilities. It previously ran
+  with `warn-only: true`, which meant it reported findings and always passed.
+- Required status checks on `main` went from 8 to 12, adding `dco`,
+  `workflow-audit`, `dependency-review`, and `CodeQL`.
+
+### Documentation
+
+- **`agentOS fork` is documented as working, because it is.** The README, CLI
+  reference, glossary, and this file previously described it as a placeholder
+  that reports the feature is not implemented. It replays a recorded prefix
+  deterministically and then continues live, and has been tested since July.
+- The maintainer contact address is corrected across the repository.
+
 ## v0.1.0-alpha - 2026-05-30
 
 This is the first public alpha release of AgentOS. It is intended for local
