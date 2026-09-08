@@ -112,7 +112,7 @@ without the licensing history becoming unusable.
 | Want to use the *name* AgentOS | Email me |
 | Not sure | Email me — a written answer costs nothing |
 
-**WAHIB EL KHADIRI** — <wahibelkhadirii@gmail.com>
+**WAHIB EL KHADIRI** — <wahibelkhadiri06@gmail.com>
 
 Genuine open-source projects, students, researchers, and non-profits: the
 answer to almost anything is yes, in writing, free.

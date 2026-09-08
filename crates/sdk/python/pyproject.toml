@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [
-    { name = "WAHIB EL KHADIRI", email = "wahibelkhadirii@gmail.com" },
+    { name = "WAHIB EL KHADIRI", email = "wahibelkhadiri06@gmail.com" },
 ]
 dependencies = [
     "httpx>=0.28.1",
