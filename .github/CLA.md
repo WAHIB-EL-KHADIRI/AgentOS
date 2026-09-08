@@ -185,4 +185,4 @@ be able to show that you did.
 
 If any part of this agreement blocks you from contributing — in particular if
 your employer's policy conflicts with it — open a discussion or email
-<wahibelkhadirii@gmail.com>. Bring the concern; there is usually a way through.
+<wahibelkhadiri06@gmail.com>. Bring the concern; there is usually a way through.

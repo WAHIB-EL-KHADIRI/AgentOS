@@ -103,7 +103,7 @@ guesses. If you are running agents in production and need any row from the
 Enterprise table, early collaboration gets you the feature shaped around your
 constraints.
 
-Contact **WAHIB EL KHADIRI** — <wahibelkhadirii@gmail.com>. Tell me what you are
+Contact **WAHIB EL KHADIRI** — <wahibelkhadiri06@gmail.com>. Tell me what you are
 running, what breaks, and what your auditors ask for.
 
 See also: [`LICENSING.md`](../LICENSING.md) for the licence terms themselves.
