@@ -70,15 +70,31 @@ jobs:
           set -o pipefail
           bash scripts/check.sh 2>&1 | tee check_output.log
 
+      # `failure()` fires for any earlier step in the job, and the two
+      # `npm ci` steps run before check.sh has created check_output.log. When
+      # one of those is what failed, `tail` exited 1 under `bash -e` and this
+      # step went red too -- a second error, with an empty summary, sitting on
+      # top of the real one. A failure reporter must never obscure the failure
+      # it is reporting.
       - name: Publish failure log to run summary
         if: failure()
         run: |
-          {
-            echo '## check.sh failure tail'
-            echo '```'
-            tail -c 60000 check_output.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -f check_output.log ]; then
+            {
+              echo '## check.sh failure tail'
+              echo '```'
+              tail -c 60000 check_output.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo '## No check.sh output'
+              echo
+              echo 'The job failed before `Repository check script` ran, so no'
+              echo '`check_output.log` exists. The failing step above is the'
+              echo 'original failure.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets
