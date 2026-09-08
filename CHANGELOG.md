@@ -39,8 +39,6 @@ not a production-hardened release.
 
 - AgentOS is alpha software. APIs and behavior may change before a stable
   release.
-- `agentOS fork` is a placeholder and currently reports that trace forking is
-  not implemented yet.
 - Restart and recovery behavior should not be described as production-ready
   until stronger tests and public guarantees are in place.
 - WASM plugins are experimental and should not be treated as a strong security

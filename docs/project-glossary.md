@@ -59,8 +59,10 @@ external state affects the result.
 
 ## Fork
 
-A planned execution branch created from an existing checkpoint. The CLI command
-exists as a placeholder, but trace forking is not implemented yet.
+An execution branch created from an existing checkpoint. `agentOS fork` replays
+the recorded prefix up to that checkpoint, then continues live from there. The
+forked run is journaled under its own agent id, so it can be replayed or forked
+again.
 
 ## Vault
 

@@ -85,10 +85,19 @@ agentOS run --agent my_agent.toml     # every execution step is journaled automa
 agentOS replay --session agent_123    # re-run offline: no API key, no cost, drift-checked
 ```
 
-Branching a checkpoint into an alternate timeline is the next step on this
-path. The journal already records per-exchange checkpoints as fork anchors,
-but `agentOS fork` is currently a placeholder: it reports that forking is not
-implemented yet.
+Branching a checkpoint into an alternate timeline works the same way. The
+journal records per-exchange checkpoints as fork anchors, and `agentOS fork`
+replays the prefix up to the checkpoint against the recording, then continues
+live from there:
+
+```bash
+agentOS fork --from ckpt_4 --prompt "try the other path"
+```
+
+The replayed prefix is identical to the original — same request fingerprints,
+and tool calls execute for real — so the only thing that changes is the branch
+you took. Without a live provider configured the fork still runs the recorded
+prefix and says so, rather than failing.
 
 <!-- TODO(launch): demo GIF of the dashboard Recordings scrubber goes here -->
 
@@ -191,6 +200,10 @@ Experimental:
   (LLM exchanges + tool results); `agentOS replay --session <agent_id>`
   re-executes it with recorded responses (no API key needed) and reports
   drift.
+- Trace forking: `agentOS fork --from <checkpoint>` replays the prefix up to a
+  checkpoint against the recording, then continues live from there. Tool calls
+  execute during the replayed prefix, and without a live provider the fork runs
+  the recorded prefix and says so.
 - Dashboard Recordings view: a time-travel scrubber over recorded sessions
   (slider and step controls across the prompt, exchanges, tool calls and
   results, with per-exchange checkpoints shown as fork anchors).
@@ -200,9 +213,6 @@ Experimental:
 Planned or still being hardened:
 
 - Stronger restart and recovery guarantees with explicit tests.
-- Trace forking: replaying a prefix from a checkpoint, then continuing live.
-  `agentOS fork` exists as a command but reports that this is not implemented
-  yet.
 - Dashboard diff view between an original run and its forks.
 - Published SDK packages.
 - More integration examples for existing agent frameworks.
@@ -267,7 +277,7 @@ agentOS ps
 agentOS logs --id agent_123
 agentOS trace --id agent_123
 agentOS replay --session agent_123
-agentOS fork --from ckpt_456 --prompt "explore the alternative"   # placeholder, see above
+agentOS fork --from ckpt_456 --prompt "explore the alternative"
 agentOS status
 agentOS doctor
 agentOS repl
