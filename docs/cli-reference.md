@@ -185,11 +185,11 @@ Sessions are journaled automatically by `agentOS run` under
 replayed. Replay is deterministic at the LLM boundary; tools re-execute for
 real and any changed tool behavior is reported as drift.
 
-### Forking (not implemented yet)
+### Forking
 
-`agentOS fork` is a placeholder. The command parses its arguments and then
-reports that trace forking is not implemented; it does not replay a prefix or
-continue against a live provider. The intended shape, once it lands:
+`agentOS fork` replays a recorded prefix deterministically and then continues
+live from that point, so you can take a different branch without re-paying for
+everything that led up to it.
 
 ```bash
 # Replay the first 2 recorded exchanges, then continue with the live provider.
@@ -199,8 +199,19 @@ agentOS fork --session agent_123 --at 2 --prompt "Try a different approach"
 agentOS fork --from <exchange_checkpoint>
 ```
 
-The journal side of this already exists: `replay --session` prints the
-per-exchange checkpoints that will serve as fork anchors.
+The forked run gets its own agent id (`<original>_fork_<timestamp>`) and is
+journaled like any other run, so it can itself be replayed or forked again.
+
+Two details worth knowing:
+
+- **The replayed prefix is genuinely identical.** Request fingerprints match the
+  recording, and tool calls execute for real against the registered tools rather
+  than being faked from the journal.
+- **A live provider is optional.** Without one, the fork runs the recorded
+  prefix and tells you it cannot continue past it, rather than failing.
+
+Checkpoint ids come from `replay --session`, which prints the per-exchange
+checkpoints that serve as fork anchors.
 
 ## State Lifecycle Commands
 
