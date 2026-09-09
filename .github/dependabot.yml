@@ -41,6 +41,9 @@ updates:
           - "@types/react"
           - "@types/react-dom"
           - "@testing-library/*"
+        update-types:
+          - "minor"
+          - "patch"
       frontend-tooling:
         patterns:
           - "eslint*"
@@ -50,6 +53,9 @@ updates:
           - "vite"
           - "vitest"
           - "@vitejs/*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: pip
     directory: /crates/sdk/python
