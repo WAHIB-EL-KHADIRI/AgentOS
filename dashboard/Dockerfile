@@ -1,6 +1,6 @@
 # Pinned by digest; the tag is kept alongside so it stays readable and so
 # Dependabot's docker ecosystem can bump both together.
-FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS builder
+FROM node:24-alpine@sha256:50c8e8ca1d27439048670df5883f32d57cf81cff6233222c893fd0d9884cbd81 AS builder
 
 WORKDIR /app
 COPY package.json package-lock.json ./
