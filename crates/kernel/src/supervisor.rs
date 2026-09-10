@@ -8,13 +8,11 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{info, warn};
 
 use crate::agent::{
-    run_agent_loop_with_observers, Agent, AgentCommand, AgentId, AgentSpec, AgentState,
-    LifecycleEvent, SUPERVISOR_TICK,
+    run_agent_loop_with_observers, Agent, AgentId, AgentSpec, LifecycleEvent, SUPERVISOR_TICK,
 };
 use crate::error::{AgentError, AgentResult};
 use crate::handle::AgentHandle;
 
-const AGENT_START_TIMEOUT: Duration = Duration::from_secs(5);
 const AGENT_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -80,27 +78,15 @@ impl Supervisor {
 
     pub async fn spawn(&self, spec: AgentSpec) -> AgentResult<AgentHandle> {
         let (cmd_tx, cmd_rx) = mpsc::channel(32);
-        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
 
         let last_heartbeat = Arc::new(AtomicU64::new(current_time_secs()));
         let restart_count = Arc::new(AtomicU64::new(0));
 
-        let agent = Agent::new(spec.clone());
-
-        let handle = AgentHandle::new(
-            agent.clone(),
-            cmd_tx.clone(),
-            self.lifecycle_tx(),
-            Arc::clone(&last_heartbeat),
-            Arc::clone(&restart_count),
-        );
-
+        let mut agent = Agent::new(spec.clone());
         let agent_id = spec.id.clone();
-        let agent_id_for_task = agent_id.clone();
         let ltx = self.lifecycle_tx();
-        let state_arc = handle.state_arc();
 
-        {
+        let (handle, state_arc) = {
             let mut handles = self.handles.write().await;
 
             if handles.len() >= self.max_agents {
@@ -114,93 +100,33 @@ impl Supervisor {
                 return Err(AgentError::AlreadyRunning(spec.id.clone()));
             }
 
+            agent.start()?;
+
+            let handle = AgentHandle::new(
+                agent.clone(),
+                cmd_tx,
+                self.lifecycle_tx(),
+                Arc::clone(&last_heartbeat),
+                Arc::clone(&restart_count),
+            );
+            let state_arc = handle.state_arc();
             handles.insert(agent_id.clone(), handle.clone());
-        }
 
-        tokio::spawn(async move {
-            let mut inner_cmd_rx = cmd_rx;
+            (handle, state_arc)
+        };
 
-            tokio::select! {
-                biased;
+        let state = agent.state().clone();
+        tokio::spawn(run_agent_loop_with_observers(
+            agent,
+            ltx,
+            cmd_rx,
+            Some(state_arc),
+            last_heartbeat,
+            restart_count,
+        ));
 
-                cmd = inner_cmd_rx.recv() => {
-                    match cmd {
-                        Some(AgentCommand::Start) => {
-                            let mut a = agent.clone();
-                            let _ = a.start();
-                            let _ = started_tx.send(a.state().clone());
-                            run_agent_loop_with_observers(
-                                a,
-                                ltx,
-                                inner_cmd_rx,
-                                Some(state_arc),
-                                last_heartbeat,
-                                restart_count,
-                            )
-                            .await;
-                        }
-                        Some(AgentCommand::Shutdown) => {
-                            info!(agent_id = %agent_id_for_task, "agent shut down before starting");
-                            let _ = started_tx.send(AgentState::Stopped);
-                        }
-                        Some(other) => {
-                            warn!(agent_id = %agent_id_for_task, ?other, "unexpected command before start");
-                            let _ = started_tx.send(AgentState::Created);
-                        }
-                        None => {
-                            info!(agent_id = %agent_id_for_task, "agent command channel closed before start");
-                            let _ = started_tx.send(AgentState::Failed("channel closed".into()));
-                        }
-                    }
-                }
-                _ = tokio::time::sleep(Duration::from_secs(30)) => {
-                    warn!(agent_id = %agent_id_for_task, "agent never received start command, shutting down");
-                    let _ = started_tx.send(AgentState::Failed("timeout".into()));
-                }
-            }
-        });
-
-        if let Err(e) = cmd_tx.send(AgentCommand::Start).await {
-            warn!(agent_id = %agent_id, "failed to send start command: {e}");
-            self.cleanup_failed_spawn(&agent_id, &handle).await;
-            return Err(AgentError::ChannelClosed(agent_id));
-        }
-
-        match tokio::time::timeout(AGENT_START_TIMEOUT, started_rx).await {
-            Ok(Ok(state)) => {
-                if state == AgentState::Running {
-                    let store_handle = {
-                        let handles = self.handles.read().await;
-                        handles
-                            .get(&agent_id)
-                            .cloned()
-                            .ok_or_else(|| AgentError::NotFound(agent_id.clone()))?
-                    };
-                    store_handle.set_state(state.clone()).await;
-                    info!(agent_id = %agent_id, ?state, name = %spec.name, "agent spawned and running");
-                    Ok(store_handle)
-                } else {
-                    warn!(agent_id = %agent_id, ?state, "agent failed to start properly");
-                    self.cleanup_failed_spawn(&agent_id, &handle).await;
-                    Err(AgentError::CommandFailed(format!(
-                        "agent failed to start: {:?}",
-                        state
-                    )))
-                }
-            }
-            Ok(Err(_)) => {
-                warn!(agent_id = %agent_id, "agent start channel closed without response");
-                self.cleanup_failed_spawn(&agent_id, &handle).await;
-                Err(AgentError::CommandFailed(
-                    "agent start channel closed".into(),
-                ))
-            }
-            Err(_) => {
-                warn!(agent_id = %agent_id, "agent start timed out after 5 seconds");
-                self.cleanup_failed_spawn(&agent_id, &handle).await;
-                Err(AgentError::Timeout(agent_id))
-            }
-        }
+        info!(agent_id = %agent_id, ?state, name = %spec.name, "agent spawned and running");
+        Ok(handle)
     }
 
     pub async fn get(&self, id: &str) -> Option<AgentHandle> {
@@ -320,12 +246,6 @@ impl Supervisor {
             Ok(result) => result,
             Err(_) => Err(AgentError::Timeout(agent_id)),
         }
-    }
-
-    async fn cleanup_failed_spawn(&self, id: &str, handle: &AgentHandle) {
-        let _ = handle.shutdown().await;
-        let mut handles = self.handles.write().await;
-        handles.remove(id);
     }
 }
 

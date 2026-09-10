@@ -90,9 +90,4 @@ impl AgentHandle {
     pub(crate) fn state_arc(&self) -> Arc<Mutex<AgentState>> {
         Arc::clone(&self.state)
     }
-
-    pub(crate) async fn set_state(&self, new_state: AgentState) {
-        let mut state = self.state.lock().await;
-        *state = new_state;
-    }
 }
