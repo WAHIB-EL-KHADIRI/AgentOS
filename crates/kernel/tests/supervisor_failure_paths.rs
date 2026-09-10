@@ -6,14 +6,10 @@
 //! failure bounds that keep a hung path from blocking CI forever rather than
 //! conditions a passing run depends on.
 //!
-//! Two paths named in issue #34 are deliberately absent -- "agent panics on
-//! start" and "agent never signals ready". Both live inside the task
-//! `Supervisor::spawn` starts, and nothing on the public API can make a healthy
-//! `Agent` take them: `Agent::start` moves `Created -> Running` unconditionally,
-//! so the `Failed("timeout")` and `Failed("channel closed")` arms are
-//! unreachable from outside the crate. Covering them honestly needs a
-//! fault-injection seam in the spawn path, which is a production change and
-//! belongs in its own PR rather than being faked here.
+//! Investigation of issue #34 established that current agent startup is
+//! synchronous, so the former pseudo-readiness paths were unreachable through
+//! the public API. The actual asynchronous-readiness design is tracked
+//! separately in issue #200.
 
 use std::time::Duration;
 
