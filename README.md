@@ -14,8 +14,6 @@
   <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <a href="https://github.com/WAHIB-EL-KHADIRI/AgentOS/actions/workflows/ci.yml"><img src="https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/WAHIB-EL-KHADIRI/AgentOS"><img src="https://api.scorecard.dev/projects/github.com/WAHIB-EL-KHADIRI/AgentOS/badge" alt="OpenSSF Scorecard"></a>
-  <a href="scripts/check.ps1"><img src="https://img.shields.io/badge/windows-supported-blue" alt="Windows supported"></a>
-  <a href="docs/"><img src="https://img.shields.io/badge/docs-available-blue" alt="Docs"></a>
 </p>
 
 ---
@@ -42,7 +40,7 @@ commands trustworthy.
 - It sits **underneath** LangGraph, AutoGen, CrewAI, or your own agent loop.
   It does not replace them.
 
-**Created and maintained by [WAHIB EL KHADIRI](https://github.com/WAHIB-EL-KHADIRI)** — founder and architect.
+Written and maintained by [WAHIB EL KHADIRI](https://github.com/WAHIB-EL-KHADIRI).
 
 ## See it run
 
@@ -347,18 +345,14 @@ aligned with the roadmap.
 
 ## Ownership
 
-AgentOS was created and is led by **WAHIB EL KHADIRI**. Contributions are
-welcome and credited, while the project identity and technical direction remain
-stewarded by WAHIB EL KHADIRI.
-
-Read more: [`FOUNDER.md`](FOUNDER.md)
+Contributions are welcome and credited. Technical direction is currently set by
+the maintainer; see [`MAINTAINERS.md`](MAINTAINERS.md) for how decisions are made
+and [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to start.
 
 ## Ownership and trademark
 
-AgentOS was created, designed, and is maintained by
-**[WAHIB EL KHADIRI](https://github.com/WAHIB-EL-KHADIRI)**. Authorship and
-copyright of the original work stay with the author; see [`AUTHORS`](AUTHORS),
-[`NOTICE`](NOTICE), and [`FOUNDER.md`](FOUNDER.md).
+Copyright in the original work stays with the author; see [`AUTHORS`](AUTHORS)
+and [`NOTICE`](NOTICE).
 
 **The code is open source. The name is not.** The marks *AgentOS* and *agentOS*,
 the project identity, and the associated branding are reserved by the author and
