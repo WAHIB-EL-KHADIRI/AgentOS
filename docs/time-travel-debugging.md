@@ -30,6 +30,15 @@ responses, no API key) and reports drift, and `agentOS fork` replays a chosen
 prefix before continuing with the live provider. The working local workflow is
 `run -> trace -> replay -> fork`.
 
+**Recording requires a provider, replaying does not.** Journaling happens at the
+provider boundary, so `agentOS run` writes a journal only when it executes an
+LLM step, and it skips that step entirely when no provider is configured. A run
+with no provider still spawns and supervises the agent and still records
+lifecycle checkpoints — so `trace` and `replay --checkpoint` work — but there is
+no session for `replay --session` or `fork` to use. `AGENTOS_LLM_PROVIDER=ollama`
+is the free local way to record one; see
+[the CLI reference](cli-reference.md#you-need-a-provider-to-record-one).
+
 ## Design Goal
 
 The developer should be able to answer:

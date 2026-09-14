@@ -85,6 +85,11 @@ agentOS run --agent my_agent.toml     # every execution step is journaled automa
 agentOS replay --session agent_123    # re-run offline: no API key, no cost, drift-checked
 ```
 
+Recording needs a configured LLM provider — journaling happens at that boundary,
+so a run without one skips the LLM step and writes no session. Replaying needs
+nothing. `AGENTOS_LLM_PROVIDER=ollama` records locally for free; see
+[the CLI reference](docs/cli-reference.md#you-need-a-provider-to-record-one).
+
 Branching a checkpoint into an alternate timeline works the same way. The
 journal records per-exchange checkpoints as fork anchors, and `agentOS fork`
 replays the prefix up to the checkpoint against the recording, then continues
