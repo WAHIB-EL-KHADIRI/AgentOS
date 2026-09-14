@@ -69,6 +69,7 @@ impl AgentManifest {
             capabilities: self.capabilities,
             max_restarts,
             heartbeat_timeout_secs: 30,
+            readiness_timeout_secs: 30,
         }
     }
 }
