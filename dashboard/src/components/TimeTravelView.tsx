@@ -144,7 +144,7 @@ export default function TimeTravelView({ session }: TimeTravelViewProps) {
                     return (
                       <div key={callIndex} className="timetravel__tool">
                         <span className="timetravel__tool-call">
-                          🔧 {call.name}({call.args})
+                          {call.name}({call.args})
                         </span>
                         {result && (
                           <span
