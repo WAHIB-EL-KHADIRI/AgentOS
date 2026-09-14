@@ -244,7 +244,8 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
 
     // A failed LLM step must not take the runtime down: the agent stays
     // supervised and the failure is recorded instead of propagated.
-    let execution_checkpoint = if system.has_llm_provider().await {
+    let llm_provider_configured = system.has_llm_provider().await;
+    let execution_checkpoint = if llm_provider_configured {
         match system
             .run_agent_once(&agent_id, "Begin executing the configured agent prompt.")
             .await
@@ -325,6 +326,19 @@ pub async fn run_command(agent_path: &str, runtime_config_path: &str) -> anyhow:
             "encrypted persistence on"
         } else {
             "in-memory only (set AGENTOS_VAULT_KEY to persist)"
+        }
+    );
+    // Without a provider the LLM step is skipped, and skipping it means no
+    // journal is written -- so `replay --session` and `fork` have nothing to
+    // work with later. That is the single most confusing thing a first run can
+    // do silently, so it is reported here the same way auth and vault are.
+    println!(
+        "  llm:        {}",
+        if llm_provider_configured {
+            "provider configured (sessions are journaled and replayable)"
+        } else {
+            "none - LLM step skipped, no session recorded \
+             (set OPENAI_API_KEY or ANTHROPIC_API_KEY, or AGENTOS_LLM_PROVIDER=ollama)"
         }
     );
     println!("  agent id:   {agent_id}");
@@ -2096,10 +2110,35 @@ fn load_runtime_config_or_default(runtime_config_path: &str) -> anyhow::Result<R
 async fn replay_session_command(agent_id: &str, config_path: &str) -> anyhow::Result<()> {
     let runtime_config = load_runtime_config_or_default(config_path)?;
     let persistence = Persistence::new(&runtime_config.data_dir);
-    let session = persistence
-        .load_journal(agent_id)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // A missing journal is the expected state of a first run, not a fault, so
+    // it must not surface as "internal error" with a raw OS message attached.
+    // Say what is missing and what produces it.
+    let session = match persistence.load_journal(agent_id).await {
+        Ok(session) => session,
+        Err(error) => {
+            // Boxed deliberately. This function is already a large async state
+            // machine, and awaiting another future inline here grows it past
+            // the debug-build stack -- it overflows before it can print
+            // anything. Heap-allocating this one keeps the parent future small.
+            let recorded = Box::pin(persistence.list_journals())
+                .await
+                .unwrap_or_default();
+            let hint = if recorded.is_empty() {
+                "No sessions have been recorded in this data dir yet. A session is \
+                 journaled when `agentOS run` executes an LLM step, which needs a \
+                 provider: set OPENAI_API_KEY or ANTHROPIC_API_KEY, or \
+                 AGENTOS_LLM_PROVIDER=ollama for a local one."
+                    .to_string()
+            } else {
+                format!("Recorded sessions here: {}.", recorded.join(", "))
+            };
+            return Err(anyhow::anyhow!(
+                "no recorded session for '{agent_id}' in data dir '{}'.\n{hint}\n\
+                 (underlying error: {error})",
+                runtime_config.data_dir
+            ));
+        }
+    };
 
     print_section("Deterministic session replay");
     print_kv("agent", &session.agent_id);

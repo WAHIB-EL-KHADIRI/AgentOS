@@ -185,6 +185,42 @@ Sessions are journaled automatically by `agentOS run` under
 replayed. Replay is deterministic at the LLM boundary; tools re-execute for
 real and any changed tool behavior is reported as drift.
 
+#### You need a provider to record one
+
+Journaling happens at the provider boundary, so `agentOS run` only writes a
+journal when it actually executes an LLM step — and it only does that when a
+provider is configured. **Without one the LLM step is skipped, nothing is
+recorded, and `replay --session` has nothing to replay.** The run banner states
+which case you are in on the `llm:` line.
+
+This is the asymmetry worth remembering: *replaying* needs no API key, but
+*recording* does.
+
+Configure a provider with environment variables before `agentOS run`:
+
+| variable | effect |
+|---|---|
+| `OPENAI_API_KEY` | OpenAI; model via `OPENAI_MODEL` (default `gpt-4o`) |
+| `ANTHROPIC_API_KEY` | Anthropic; model via `ANTHROPIC_MODEL` |
+| `GOOGLE_API_KEY` | Gemini through the OpenAI-compatible endpoint |
+| `AGENTOS_LLM_PROVIDER` | force one of `openai`, `anthropic`, `gemini`, `ollama` |
+
+Left unset, `AGENTOS_LLM_PROVIDER` defaults to `auto`, which probes OpenAI, then
+Anthropic, then Gemini. **Ollama is deliberately not in that chain** — it is a
+local endpoint rather than a key, so it is never selected by accident and must
+be asked for:
+
+```bash
+# Local, free, no API key. Needs ollama running.
+export AGENTOS_LLM_PROVIDER=ollama
+export OLLAMA_MODEL=llama3.2          # optional; this is the default
+agentOS run --agent agentos-starter/agents/research-agent.toml
+agentOS replay --session agent_research_agent
+```
+
+That is the cheapest way to get a recorded session to replay and fork, and the
+only one that costs nothing.
+
 ### Forking
 
 `agentOS fork` replays a recorded prefix deterministically and then continues
