@@ -1,8 +1,8 @@
 #!/usr/bin/env pwsh
 # AgentOS one-line install (Windows)
-# Usage: iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/agentOS/main/install.ps1 | iex
+# Usage: iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.ps1 | iex
 
-$Repo = "WAHIB-EL-KHADIRI/agentOS"
+$Repo = "WAHIB-EL-KHADIRI/AgentOS"
 $BinDir = if ($env:AGENTOS_BIN) { $env:AGENTOS_BIN } else { "$HOME\.agentos\bin" }
 $Version = if ($env:AGENTOS_VERSION) { $env:AGENTOS_VERSION } else { "latest" }
 
@@ -15,12 +15,16 @@ $Target = "x86_64-pc-windows-msvc"
 $Tag = if ($Version -eq "latest") { "latest" } else { $Version -replace '[/\0]', '_' }
 
 if ($Version -eq "latest") {
-  $ApiUrl = "https://api.github.com/repos/$Repo/releases/latest"
+  # /releases/latest excludes pre-releases, and every AgentOS release so far
+  # is one -- so that endpoint 404s on this repository. Read the release list
+  # instead and take the newest entry.
+  $ApiUrl = "https://api.github.com/repos/$Repo/releases?per_page=1"
   try {
-    $Release = Invoke-RestMethod -Uri $ApiUrl -ErrorAction Stop
+    $Release = Invoke-RestMethod -Uri $ApiUrl -ErrorAction Stop | Select-Object -First 1
     $Tag = $Release.tag_name
+    if (-not $Tag) { throw "the release list came back empty" }
   } catch {
-    Stop-AgentOSInstall "Could not resolve latest release from GitHub API. Build from source with: cargo install --path crates/cli"
+    Stop-AgentOSInstall "Could not resolve the latest release from the GitHub API. Build from source with: cargo install --path crates/cli"
   }
 } else {
   $Tag = $Version

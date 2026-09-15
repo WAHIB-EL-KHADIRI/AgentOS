@@ -1,6 +1,6 @@
 # AgentOS Python SDK
 
-Python client library for [AgentOS](https://github.com/WAHIB-EL-KHADIRI/agentOS) — the open-source runtime layer for AI agents.
+Python client library for [AgentOS](https://github.com/WAHIB-EL-KHADIRI/AgentOS) — the open-source runtime layer for AI agents.
 
 ## Installation
 
@@ -46,4 +46,4 @@ asyncio.run(main())
 
 ## Documentation
 
-Full documentation: https://github.com/WAHIB-EL-KHADIRI/agentOS
+Full documentation: https://github.com/WAHIB-EL-KHADIRI/AgentOS

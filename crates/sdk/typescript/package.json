@@ -31,7 +31,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/WAHIB-EL-KHADIRI/agentOS.git"
+    "url": "https://github.com/WAHIB-EL-KHADIRI/AgentOS.git"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

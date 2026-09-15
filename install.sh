@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # AgentOS one-line install
-# Usage: curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/agentOS/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.sh | bash
 
-REPO="WAHIB-EL-KHADIRI/agentOS"
+REPO="WAHIB-EL-KHADIRI/AgentOS"
 BIN_DIR="${AGENTOS_BIN:-$HOME/.agentos/bin}"
 VERSION="${AGENTOS_VERSION:-latest}"
 
@@ -35,9 +35,17 @@ if command -v agentOS >/dev/null 2>&1; then
 fi
 
 if [ "$VERSION" = "latest" ]; then
-  API_URL="https://api.github.com/repos/$REPO/releases/latest"
-  TAG="$(curl -fsSL "$API_URL" | grep '"tag_name"' | cut -d'"' -f4)"
-  [ -z "$TAG" ] && err "Could not resolve latest release from GitHub API. Build from source with: cargo install --path crates/cli"
+  # /releases/latest excludes pre-releases, and every AgentOS release so far
+  # is one -- so that endpoint 404s on this repository. Read the release list
+  # instead and take the newest entry, which is what "latest" has to mean
+  # while the project is in alpha.
+  #
+  # `|| true` matters: under `set -euo pipefail` a failing curl or a grep that
+  # matches nothing aborts the script here, so without it the error message on
+  # the next line is unreachable and the user sees a bare non-zero exit.
+  API_URL="https://api.github.com/repos/$REPO/releases?per_page=1"
+  TAG="$(curl -fsSL "$API_URL" | grep '"tag_name"' | head -n 1 | cut -d'"' -f4 || true)"
+  [ -z "$TAG" ] && err "Could not resolve the latest release from the GitHub API. Build from source with: cargo install --path crates/cli"
 else
   TAG="$(sanitize_tag "$VERSION")"
 fi
