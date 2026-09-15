@@ -18,7 +18,6 @@ pub struct AgentConfig {
     pub capabilities: Vec<String>,
     pub max_restarts: u32,
     pub heartbeat_timeout_secs: u64,
-    pub readiness_timeout_secs: u64,
 }
 
 impl Default for AgentConfig {
@@ -29,7 +28,6 @@ impl Default for AgentConfig {
             capabilities: Vec::new(),
             max_restarts: 5,
             heartbeat_timeout_secs: 30,
-            readiness_timeout_secs: 30,
         }
     }
 }
@@ -91,6 +89,7 @@ impl AgentHandle {
 pub struct AgentBuilder {
     id_hint: String,
     config: AgentConfig,
+    readiness_timeout_secs: u64,
     tools: Vec<Arc<dyn Tool>>,
 }
 
@@ -103,6 +102,7 @@ impl AgentBuilder {
                 ..Default::default()
             },
             id_hint: id,
+            readiness_timeout_secs: 30,
             tools: Vec::new(),
         }
     }
@@ -134,13 +134,8 @@ impl AgentBuilder {
         self
     }
 
-    pub fn heartbeat_timeout_secs(mut self, secs: u64) -> Self {
-        self.config.heartbeat_timeout_secs = secs;
-        self
-    }
-
     pub fn readiness_timeout_secs(mut self, secs: u64) -> Self {
-        self.config.readiness_timeout_secs = secs;
+        self.readiness_timeout_secs = secs;
         self
     }
 
@@ -276,7 +271,7 @@ impl AgentBuilder {
             capabilities,
             max_restarts: self.config.max_restarts,
             heartbeat_timeout_secs: self.config.heartbeat_timeout_secs,
-            readiness_timeout_secs: self.config.readiness_timeout_secs,
+            readiness_timeout_secs: self.readiness_timeout_secs,
         };
         (spec, self.tools)
     }
