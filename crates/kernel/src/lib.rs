@@ -17,7 +17,9 @@ pub mod supervisor;
 pub mod system;
 pub mod tools;
 
-pub use agent::{Agent, AgentCommand, AgentId, AgentSpec, AgentState, LifecycleEvent};
+pub use agent::{
+    Agent, AgentCommand, AgentId, AgentReadiness, AgentSpec, AgentState, LifecycleEvent,
+};
 pub use agentos_bus::{AgentBusTrait, AgentEnvelope, InMemoryBus};
 pub use circuit_breaker::{CallError, CircuitBreaker, CircuitBreakerConfig, CircuitState};
 pub use config::AgentConfig;
