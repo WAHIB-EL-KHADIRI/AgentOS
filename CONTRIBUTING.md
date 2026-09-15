@@ -112,7 +112,7 @@ Good first areas:
 ### Clone and Build
 
 ```bash
-git clone https://github.com/WAHIB-EL-KHADIRI/agentOS
+git clone https://github.com/WAHIB-EL-KHADIRI/AgentOS
 cd agentOS
 cargo build --workspace
 ```
@@ -272,7 +272,7 @@ Examples:
 ## Good First Issues
 
 Look for issues tagged with `good-first-issue` or `help-wanted` in the
-[GitHub issue tracker](https://github.com/WAHIB-EL-KHADIRI/agentOS/issues).
+[GitHub issue tracker](https://github.com/WAHIB-EL-KHADIRI/AgentOS/issues).
 
 Common entry points:
 
@@ -285,6 +285,6 @@ Common entry points:
 
 ## Getting Help
 
-- Open a [Discussion](https://github.com/WAHIB-EL-KHADIRI/agentOS/discussions)
+- Open a [Discussion](https://github.com/WAHIB-EL-KHADIRI/AgentOS/discussions)
 - Ask in issues related to your area of interest
 - Read the [FAQ](docs/faq.md) and [Project Overview](PROJECT_OVERVIEW.md)
