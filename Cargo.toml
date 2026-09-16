@@ -24,7 +24,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/WAHIB-EL-KHADIRI/agentOS"
+repository = "https://github.com/WAHIB-EL-KHADIRI/AgentOS"
 authors = ["WAHIB EL KHADIRI <wahibelkhadiri06@gmail.com>"]
 
 [workspace.dependencies]

@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.94%2B-orange" alt="Rust 1.94+"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
-  <a href="https://github.com/WAHIB-EL-KHADIRI/AgentOS/actions/workflows/ci.yml"><img src="https://github.com/WAHIB-EL-KHADIRI/agentOS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/WAHIB-EL-KHADIRI/AgentOS/actions/workflows/ci.yml"><img src="https://github.com/WAHIB-EL-KHADIRI/AgentOS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/WAHIB-EL-KHADIRI/AgentOS"><img src="https://api.scorecard.dev/projects/github.com/WAHIB-EL-KHADIRI/AgentOS/badge" alt="OpenSSF Scorecard"></a>
 </p>
 
@@ -43,6 +43,16 @@ commands trustworthy.
 Written and maintained by [WAHIB EL KHADIRI](https://github.com/WAHIB-EL-KHADIRI).
 
 ## See it run
+
+<p align="center">
+  <img src="assets/replay-demo.gif" alt="agentOS replay --session agent_123 re-running a recorded session offline, each exchange reporting fingerprint OK and drift=0" width="760">
+</p>
+
+<p align="center">
+  <sub>16 seconds of the overview.
+  <a href="https://github.com/WAHIB-EL-KHADIRI/AgentOS/releases/download/v0.1.0-alpha.3/agentOS-overview.mp4">Full video (1:34, 5.7&nbsp;MB)</a>
+  — attached to the v0.1.0-alpha.3 release rather than committed, to keep a clone small.</sub>
+</p>
 
 Real output from a fresh clone — no API key required to bring the runtime up:
 
@@ -152,7 +162,7 @@ bash scripts/demo.sh --check
 The most reliable path during early development is building from source:
 
 ```bash
-git clone https://github.com/WAHIB-EL-KHADIRI/agentOS
+git clone https://github.com/WAHIB-EL-KHADIRI/AgentOS
 cd agentOS
 cargo build --workspace
 cargo run -p agentos-cli -- run --agent examples/simple_agent.toml

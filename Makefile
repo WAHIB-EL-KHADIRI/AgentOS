@@ -116,14 +116,14 @@ examples-all: sdk-example code-review wasm-plugin
 # Install
 install:
 	@echo "Run the install script directly:"
-	@echo "  curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/agentOS/main/install.sh | bash"
+	@echo "  curl -fsSL https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.sh | bash"
 	@echo ""
 	@echo "Or install from source:"
 	@echo "  cargo install --path crates/cli"
 
 install-windows:
 	@echo "Run the install script in PowerShell:"
-	@echo "  iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/agentOS/main/install.ps1 | iex"
+	@echo "  iwr -useb https://raw.githubusercontent.com/WAHIB-EL-KHADIRI/AgentOS/main/install.ps1 | iex"
 
 # Demo
 demo:

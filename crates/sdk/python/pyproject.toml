@@ -28,10 +28,10 @@ classifiers = [
 ]
 
 [project.urls]
-homepage = "https://github.com/WAHIB-EL-KHADIRI/agentOS"
-repository = "https://github.com/WAHIB-EL-KHADIRI/agentOS"
-documentation = "https://github.com/WAHIB-EL-KHADIRI/agentOS/tree/main/crates/sdk/python"
-changelog = "https://github.com/WAHIB-EL-KHADIRI/agentOS/blob/main/CHANGELOG.md"
+homepage = "https://github.com/WAHIB-EL-KHADIRI/AgentOS"
+repository = "https://github.com/WAHIB-EL-KHADIRI/AgentOS"
+documentation = "https://github.com/WAHIB-EL-KHADIRI/AgentOS/tree/main/crates/sdk/python"
+changelog = "https://github.com/WAHIB-EL-KHADIRI/AgentOS/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
