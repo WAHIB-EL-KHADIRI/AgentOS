@@ -44,6 +44,16 @@ Written and maintained by [WAHIB EL KHADIRI](https://github.com/WAHIB-EL-KHADIRI
 
 ## See it run
 
+<p align="center">
+  <img src="assets/replay-demo.gif" alt="agentOS replay --session agent_123 re-running a recorded session offline, each exchange reporting fingerprint OK and drift=0" width="760">
+</p>
+
+<p align="center">
+  <sub>16 seconds of the overview.
+  <a href="https://github.com/WAHIB-EL-KHADIRI/AgentOS/releases/download/v0.1.0-alpha.3/agentOS-overview.mp4">Full video (1:34, 5.7&nbsp;MB)</a>
+  — attached to the v0.1.0-alpha.3 release rather than committed, to keep a clone small.</sub>
+</p>
+
 Real output from a fresh clone — no API key required to bring the runtime up:
 
 ```text
