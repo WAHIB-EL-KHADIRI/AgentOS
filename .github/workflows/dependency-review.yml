@@ -26,8 +26,13 @@ permissions:
   contents: read
 
 jobs:
+  # Deliberately has no `name:`. GitHub reports a job's status-check context
+  # under its display name when one is set, so `name: Dependency Review` made
+  # this report as "Dependency Review" while branch protection required
+
+  # "dependency-review" -- a context that then never arrived, leaving main
+  # permanently blocked and admin bypass the only way to merge.
   dependency-review:
-    name: Dependency Review
     runs-on: ubuntu-latest
     permissions:
       contents: read
