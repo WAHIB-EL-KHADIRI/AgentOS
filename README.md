@@ -163,7 +163,7 @@ The most reliable path during early development is building from source:
 
 ```bash
 git clone https://github.com/WAHIB-EL-KHADIRI/AgentOS
-cd agentOS
+cd AgentOS
 cargo build --workspace
 cargo run -p agentos-cli -- run --agent examples/simple_agent.toml
 ```
