@@ -41,8 +41,8 @@ include = ["agentos*"]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
-    "ruff>=0.16.6",
-    "build>=1.6.0",
+    "ruff>=0.16.7",
+    "build>=1.6.1",
 ]
 
 [tool.setuptools.package-data]
