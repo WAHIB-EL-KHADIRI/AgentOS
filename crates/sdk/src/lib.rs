@@ -7,6 +7,7 @@ pub mod error;
 pub mod tool;
 
 pub use agent::{AgentBuilder, AgentConfig, AgentHandle};
+pub use agentos_kernel::AgentReadiness;
 pub use bus::BusClient;
 pub use context::AgentContext;
 pub use error::{SdkError, SdkResult};
