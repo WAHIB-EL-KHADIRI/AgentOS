@@ -76,6 +76,16 @@ updates:
     labels:
       - dependencies
       - ci
+    groups:
+      # codeql-action/init and codeql-action/analyze refuse to run at
+      # different versions: analyze aborts with "Loaded a configuration file
+      # for version X, but running version Y". Ungrouped, Dependabot opens one
+      # pull request per action, and each is a version mismatch on its own, so
+      # neither can ever go green. Grouping them is not tidiness, it is the
+      # only way a bump of this action can pass CI.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   # Base images carry OS-level CVEs; nothing was watching them.
   - package-ecosystem: docker
