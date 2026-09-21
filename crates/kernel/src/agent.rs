@@ -204,6 +204,51 @@ pub(crate) async fn run_agent_loop_with_observers(
     .await;
 }
 
+/// Emit a lifecycle event without ever parking the agent loop.
+///
+/// The lifecycle channel is bounded and production code is free to leave it
+/// undrained -- `cli/dev.rs` and `cli/repl.rs` both spawn agents and never call
+/// `recv_lifecycle`. A blocking `send` inside the `select!` below would then park
+/// the loop mid-arm, so `cmd_rx` stops being polled and `Stop`, `Shutdown` and
+/// `Restart` become undeliverable for the remaining life of the process. At one
+/// heartbeat per `HEARTBEAT_INTERVAL` a single agent fills the channel in minutes,
+/// which makes that a routine outcome rather than a failure case.
+///
+/// Emission is therefore lossy by design. Nothing load-bearing depends on it:
+/// `Supervisor::stale_handles_at` reads the `last_heartbeat` atomic, which is
+/// stored before this is ever called. Only observers can miss an event, and a
+/// dropped one is logged.
+fn emit_lifecycle(tx: &mpsc::Sender<LifecycleEvent>, agent_id: &str, event: LifecycleEvent) {
+    // Heartbeats are periodic, so a full channel would log on every tick. The
+    // terminal events are one-shot and worth a louder line.
+    let is_heartbeat = matches!(event, LifecycleEvent::Heartbeat(_));
+
+    match tx.try_send(event) {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Full(dropped)) => {
+            if is_heartbeat {
+                tracing::debug!(
+                    agent_id = %agent_id,
+                    "lifecycle channel full, heartbeat dropped"
+                );
+            } else {
+                tracing::warn!(
+                    agent_id = %agent_id,
+                    event = ?dropped,
+                    "lifecycle channel full, event dropped; no consumer is draining it"
+                );
+            }
+        }
+        Err(mpsc::error::TrySendError::Closed(dropped)) => {
+            tracing::debug!(
+                agent_id = %agent_id,
+                event = ?dropped,
+                "lifecycle channel closed, event dropped"
+            );
+        }
+    }
+}
+
 async fn run_agent_loop_inner(
     mut agent: Agent,
     lifecycle_tx: mpsc::Sender<LifecycleEvent>,
@@ -223,9 +268,11 @@ async fn run_agent_loop_inner(
         last.store(current_time_secs(), Ordering::Relaxed);
     }
 
-    let _ = lifecycle_tx
-        .send(LifecycleEvent::Started(agent_id.clone()))
-        .await;
+    emit_lifecycle(
+        &lifecycle_tx,
+        &agent_id,
+        LifecycleEvent::Started(agent_id.clone()),
+    );
 
     let mut heartbeat_interval = tokio::time::interval(HEARTBEAT_INTERVAL);
     heartbeat_interval.tick().await;
@@ -238,7 +285,7 @@ async fn run_agent_loop_inner(
                 if let Some(ref last) = last_heartbeat {
                     last.store(current_time_secs(), Ordering::Relaxed);
                 }
-                let _ = lifecycle_tx.send(LifecycleEvent::Heartbeat(agent_id.clone())).await;
+                emit_lifecycle(&lifecycle_tx, &agent_id, LifecycleEvent::Heartbeat(agent_id.clone()));
             }
             cmd = cmd_rx.recv() => {
                 match cmd {
@@ -248,7 +295,7 @@ async fn run_agent_loop_inner(
                         if let Some(ref s) = state_arc {
                             *s.lock().await = AgentState::Stopped;
                         }
-                        let _ = lifecycle_tx.send(LifecycleEvent::Stopped(agent_id.clone())).await;
+                        emit_lifecycle(&lifecycle_tx, &agent_id, LifecycleEvent::Stopped(agent_id.clone()));
                         break;
                     }
                     Some(AgentCommand::Restart) => {
@@ -259,7 +306,7 @@ async fn run_agent_loop_inner(
                             if let Some(ref s) = state_arc {
                                 *s.lock().await = AgentState::Failed(msg.clone());
                             }
-                            let _ = lifecycle_tx.send(LifecycleEvent::Failed(agent_id.clone(), msg)).await;
+                            emit_lifecycle(&lifecycle_tx, &agent_id, LifecycleEvent::Failed(agent_id.clone(), msg));
                             break;
                         }
                         agent.restart_count += 1;
@@ -275,13 +322,13 @@ async fn run_agent_loop_inner(
                             if let Some(ref s) = state_arc {
                                 *s.lock().await = AgentState::Failed(msg.clone());
                             }
-                            let _ = lifecycle_tx.send(LifecycleEvent::Failed(agent_id.clone(), msg)).await;
+                            emit_lifecycle(&lifecycle_tx, &agent_id, LifecycleEvent::Failed(agent_id.clone(), msg));
                             break;
                         }
                         if let Some(ref s) = state_arc {
                             *s.lock().await = AgentState::Running;
                         }
-                        let _ = lifecycle_tx.send(LifecycleEvent::Started(agent_id.clone())).await;
+                        emit_lifecycle(&lifecycle_tx, &agent_id, LifecycleEvent::Started(agent_id.clone()));
                     }
                     Some(AgentCommand::Shutdown) => {
                         tracing::info!(agent_id = %agent_id, "shutting down agent");
@@ -289,7 +336,7 @@ async fn run_agent_loop_inner(
                         if let Some(ref s) = state_arc {
                             *s.lock().await = AgentState::Stopped;
                         }
-                        let _ = lifecycle_tx.send(LifecycleEvent::Stopped(agent_id.clone())).await;
+                        emit_lifecycle(&lifecycle_tx, &agent_id, LifecycleEvent::Stopped(agent_id.clone()));
                         break;
                     }
                     None => {
@@ -298,7 +345,7 @@ async fn run_agent_loop_inner(
                         if let Some(ref s) = state_arc {
                             *s.lock().await = AgentState::Failed("command channel closed".into());
                         }
-                        let _ = lifecycle_tx.send(LifecycleEvent::Failed(agent_id.clone(), "command channel closed".into())).await;
+                        emit_lifecycle(&lifecycle_tx, &agent_id, LifecycleEvent::Failed(agent_id.clone(), "command channel closed".into()));
                         break;
                     }
                     Some(AgentCommand::Start) => {
@@ -325,6 +372,53 @@ fn current_time_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A full lifecycle channel must not cost the agent its ability to be
+    /// stopped.
+    ///
+    /// This is reachable without any failure at all: `cli/dev.rs` and
+    /// `cli/repl.rs` spawn agents and never drain the channel, so the heartbeat
+    /// alone fills it after `256 * HEARTBEAT_INTERVAL` -- about twenty minutes of
+    /// entirely normal operation. Before the fix the heartbeat arm of the
+    /// `select!` parked on a blocking `send`, `cmd_rx` stopped being polled, and
+    /// `Stop` could never be delivered again.
+    ///
+    /// Capacity 1 reproduces the same state as capacity 256 without the wait:
+    /// the initial `Started` fills the channel outright, so the very next
+    /// emission -- here the `Stopped` on the way out -- meets a full channel.
+    /// That is the same blocking send the heartbeat arm performs, reached
+    /// without depending on `tokio`'s `test-util` time control.
+    #[tokio::test]
+    async fn test_full_lifecycle_channel_does_not_make_an_agent_unstoppable() {
+        let (lifecycle_tx, _lifecycle_rx) = mpsc::channel(1);
+        let (cmd_tx, cmd_rx) = mpsc::channel(8);
+
+        let agent = Agent::new(AgentSpec::new("unstoppable", "Unstoppable"));
+        let loop_handle = tokio::spawn(run_agent_loop_inner(
+            agent,
+            lifecycle_tx,
+            cmd_rx,
+            None,
+            None,
+            None,
+        ));
+
+        // Let `Started` land, which leaves the channel full. `_lifecycle_rx` is
+        // deliberately never drained: that is exactly what cli/dev.rs does.
+        tokio::task::yield_now().await;
+
+        cmd_tx
+            .send(AgentCommand::Stop)
+            .await
+            .expect("agent loop must still be receiving commands");
+
+        let stopped = tokio::time::timeout(Duration::from_secs(5), loop_handle).await;
+        assert!(
+            stopped.is_ok(),
+            "agent ignored Stop: the loop is parked emitting a lifecycle event \
+             into a full channel and no longer polls cmd_rx"
+        );
+    }
 
     #[test]
     fn test_agent_creation() {
