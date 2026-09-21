@@ -113,7 +113,7 @@ Good first areas:
 
 ```bash
 git clone https://github.com/WAHIB-EL-KHADIRI/AgentOS
-cd agentOS
+cd AgentOS
 cargo build --workspace
 ```
 
