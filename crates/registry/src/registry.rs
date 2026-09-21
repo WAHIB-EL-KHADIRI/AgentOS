@@ -276,11 +276,14 @@ mod tests {
         assert!(!name.is_char_boundary(MAX_NAME_LEN));
         assert!(!endpoint.is_char_boundary(MAX_ENDPOINT_LEN));
 
-        let descriptor = ServiceDescriptor::new(name, endpoint);
+        let descriptor = ServiceDescriptor::new(name.clone(), endpoint.clone());
 
         assert!(descriptor.name.len() <= MAX_NAME_LEN);
         assert!(descriptor.endpoint.len() <= MAX_ENDPOINT_LEN);
-        assert!(descriptor.name.is_char_boundary(descriptor.name.len()));
-        assert!(descriptor.endpoint.is_char_boundary(descriptor.endpoint.len()));
+        // A prefix, so the cut trimmed rather than mangled. Checking
+        // is_char_boundary(len()) would prove nothing - the end of a String is
+        // always a boundary.
+        assert!(name.starts_with(&descriptor.name));
+        assert!(endpoint.starts_with(&descriptor.endpoint));
     }
 }

@@ -453,10 +453,12 @@ mod tests {
         assert!(content.len() > MAX_CONTENT_LEN);
         assert!(!content.is_char_boundary(MAX_CONTENT_LEN));
 
-        let record = MemoryRecord::new("agent-1", content);
+        let record = MemoryRecord::new("agent-1", content.clone());
 
         assert!(record.content.len() <= MAX_CONTENT_LEN);
-        assert!(record.content.is_char_boundary(record.content.len()));
-        assert!(record.content.starts_with('a'));
+        // A prefix, so the cut trimmed rather than mangled. Checking
+        // is_char_boundary(len()) would prove nothing - the end of a String is
+        // always a boundary.
+        assert!(content.starts_with(&record.content));
     }
 }
