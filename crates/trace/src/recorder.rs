@@ -5,6 +5,24 @@ const MAX_METADATA_KEY_LEN: usize = 256;
 const MAX_METADATA_VAL_LEN: usize = 10_000;
 const MAX_METADATA_ENTRIES: usize = 1_000;
 
+/// Truncate to at most `max_bytes`, stepping back to the nearest character
+/// boundary.
+///
+/// The limits above are byte counts, but `String::truncate` panics when the
+/// index lands inside a multi-byte character. Any text that is not pure ASCII
+/// will eventually put one there, so cutting at the raw limit aborts the
+/// process on ordinary Arabic, CJK or emoji content.
+fn truncate_on_char_boundary(s: &mut String, max_bytes: usize) {
+    if s.len() <= max_bytes {
+        return;
+    }
+    let mut end = max_bytes;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s.truncate(end);
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecordedThought {
     pub checkpoint_id: String,
@@ -18,9 +36,7 @@ pub struct RecordedThought {
 impl RecordedThought {
     pub fn new(agent_id: impl Into<String>, content: impl Into<String>) -> Self {
         let mut content: String = content.into();
-        if content.len() > MAX_CONTENT_LEN {
-            content.truncate(MAX_CONTENT_LEN);
-        }
+        truncate_on_char_boundary(&mut content, MAX_CONTENT_LEN);
         Self {
             checkpoint_id: uuid::Uuid::new_v4().to_string(),
             agent_id: agent_id.into(),
@@ -42,12 +58,8 @@ impl RecordedThought {
         }
         let mut key: String = key.into();
         let mut value: String = value.into();
-        if key.len() > MAX_METADATA_KEY_LEN {
-            key.truncate(MAX_METADATA_KEY_LEN);
-        }
-        if value.len() > MAX_METADATA_VAL_LEN {
-            value.truncate(MAX_METADATA_VAL_LEN);
-        }
+        truncate_on_char_boundary(&mut key, MAX_METADATA_KEY_LEN);
+        truncate_on_char_boundary(&mut value, MAX_METADATA_VAL_LEN);
         self.metadata.insert(key, value);
         self
     }
@@ -218,5 +230,36 @@ mod tests {
 
         let branches = recorder.branches();
         assert!(branches.len() >= 2);
+    }
+
+    // Arabic letters are two bytes each. The single ASCII byte in front makes
+    // every following character start at an odd offset, so the even byte limit
+    // lands inside one of them -- which is what `String::truncate` panics on.
+    // This is the trace recorder, so the content is ordinary agent output.
+    #[test]
+    fn oversized_non_ascii_content_does_not_panic() {
+        let content = format!("a{}", "م".repeat(MAX_CONTENT_LEN));
+        assert!(content.len() > MAX_CONTENT_LEN);
+        assert!(!content.is_char_boundary(MAX_CONTENT_LEN));
+
+        let thought = RecordedThought::new("agent-1", content);
+
+        assert!(thought.content.len() <= MAX_CONTENT_LEN);
+        assert!(thought.content.is_char_boundary(thought.content.len()));
+        assert!(thought.content.starts_with('a'));
+    }
+
+    #[test]
+    fn oversized_non_ascii_metadata_does_not_panic() {
+        let key = format!("a{}", "م".repeat(MAX_METADATA_KEY_LEN));
+        let value = format!("a{}", "م".repeat(MAX_METADATA_VAL_LEN));
+        assert!(!key.is_char_boundary(MAX_METADATA_KEY_LEN));
+        assert!(!value.is_char_boundary(MAX_METADATA_VAL_LEN));
+
+        let thought = RecordedThought::new("agent-1", "c").with_metadata(key, value);
+
+        let (k, v) = thought.metadata.iter().next().expect("metadata was stored");
+        assert!(k.len() <= MAX_METADATA_KEY_LEN);
+        assert!(v.len() <= MAX_METADATA_VAL_LEN);
     }
 }

@@ -7,6 +7,24 @@ use thiserror::Error;
 
 const MAX_CONTENT_LEN: usize = 1_000_000;
 
+/// Truncate to at most `max_bytes`, stepping back to the nearest character
+/// boundary.
+///
+/// `MAX_CONTENT_LEN` is a byte count, but `String::truncate` panics when the
+/// index lands inside a multi-byte character. Any text that is not pure ASCII
+/// will eventually put one there, so cutting at the raw limit aborts the
+/// process on ordinary Arabic, CJK or emoji content.
+fn truncate_on_char_boundary(s: &mut String, max_bytes: usize) {
+    if s.len() <= max_bytes {
+        return;
+    }
+    let mut end = max_bytes;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s.truncate(end);
+}
+
 pub type MemoryResult<T> = Result<T, MemoryError>;
 
 #[derive(Debug, Error)]
@@ -45,9 +63,7 @@ pub struct MemoryRecord {
 impl MemoryRecord {
     pub fn new(agent_id: impl Into<String>, content: impl Into<String>) -> Self {
         let mut content: String = content.into();
-        if content.len() > MAX_CONTENT_LEN {
-            content.truncate(MAX_CONTENT_LEN);
-        }
+        truncate_on_char_boundary(&mut content, MAX_CONTENT_LEN);
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             agent_id: agent_id.into(),
@@ -425,5 +441,22 @@ mod tests {
         assert_eq!(store.count("agent-1").unwrap(), 0);
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    // Arabic letters are two bytes each. The single ASCII byte in front makes
+    // every following character start at an odd offset, so the even byte limit
+    // lands inside one of them -- which is what `String::truncate` panics on.
+    // The path is public: AgentSystem::store_memory reaches it with LLM output.
+    #[test]
+    fn oversized_non_ascii_content_does_not_panic() {
+        let content = format!("a{}", "م".repeat(MAX_CONTENT_LEN));
+        assert!(content.len() > MAX_CONTENT_LEN);
+        assert!(!content.is_char_boundary(MAX_CONTENT_LEN));
+
+        let record = MemoryRecord::new("agent-1", content);
+
+        assert!(record.content.len() <= MAX_CONTENT_LEN);
+        assert!(record.content.is_char_boundary(record.content.len()));
+        assert!(record.content.starts_with('a'));
     }
 }
