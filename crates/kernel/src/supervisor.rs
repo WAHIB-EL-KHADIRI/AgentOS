@@ -265,6 +265,11 @@ impl Supervisor {
                 return Err(AgentError::CommandFailed(reason));
             }
             Err(_) => {
+                warn!(
+                    agent_id = %agent_id,
+                    timeout_secs = timeout_secs,
+                    "readiness timed out"
+                );
                 agent.fail(format!("readiness timed out after {timeout_secs}s"));
                 return Err(AgentError::Timeout(agent_id));
             }
