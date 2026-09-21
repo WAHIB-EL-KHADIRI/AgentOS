@@ -242,11 +242,13 @@ mod tests {
         assert!(content.len() > MAX_CONTENT_LEN);
         assert!(!content.is_char_boundary(MAX_CONTENT_LEN));
 
-        let thought = RecordedThought::new("agent-1", content);
+        let thought = RecordedThought::new("agent-1", content.clone());
 
         assert!(thought.content.len() <= MAX_CONTENT_LEN);
-        assert!(thought.content.is_char_boundary(thought.content.len()));
-        assert!(thought.content.starts_with('a'));
+        // A prefix, so the cut trimmed rather than mangled. Checking
+        // is_char_boundary(len()) would prove nothing - the end of a String is
+        // always a boundary.
+        assert!(content.starts_with(&thought.content));
     }
 
     #[test]
@@ -256,10 +258,13 @@ mod tests {
         assert!(!key.is_char_boundary(MAX_METADATA_KEY_LEN));
         assert!(!value.is_char_boundary(MAX_METADATA_VAL_LEN));
 
-        let thought = RecordedThought::new("agent-1", "c").with_metadata(key, value);
+        let thought =
+            RecordedThought::new("agent-1", "c").with_metadata(key.clone(), value.clone());
 
         let (k, v) = thought.metadata.iter().next().expect("metadata was stored");
         assert!(k.len() <= MAX_METADATA_KEY_LEN);
         assert!(v.len() <= MAX_METADATA_VAL_LEN);
+        assert!(key.starts_with(k));
+        assert!(value.starts_with(v));
     }
 }
