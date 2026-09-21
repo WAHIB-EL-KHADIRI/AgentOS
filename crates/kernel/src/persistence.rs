@@ -103,10 +103,26 @@ impl Persistence {
     /// written to disk in plaintext: encryption is a required argument,
     /// not an option.
     pub async fn save_vault(&self, vault: &Vault, encryption: &VaultEncryption) -> AgentResult<()> {
-        let ciphertext = encryption
-            .encrypt_json(vault)
-            .map_err(|e| AgentError::Internal(format!("vault encryption error: {e}")))?;
+        let ciphertext = Self::encrypt_vault(vault, encryption)?;
+        self.write_vault_ciphertext(&ciphertext).await
+    }
 
+    /// Encrypt a vault without touching the disk.
+    ///
+    /// Split out of `save_vault` so a caller holding a lock over the vault can
+    /// encrypt under that lock -- serialising is CPU work and never awaits --
+    /// and then release it before awaiting the write.
+    pub(crate) fn encrypt_vault(
+        vault: &Vault,
+        encryption: &VaultEncryption,
+    ) -> AgentResult<Vec<u8>> {
+        encryption
+            .encrypt_json(vault)
+            .map_err(|e| AgentError::Internal(format!("vault encryption error: {e}")))
+    }
+
+    /// Write an already-encrypted vault blob to `secrets.enc`.
+    pub(crate) async fn write_vault_ciphertext(&self, ciphertext: &[u8]) -> AgentResult<()> {
         let path = self.vault_path();
 
         // Same unflushed-write defect as `save_trace`, and worse here:
@@ -120,7 +136,7 @@ impl Persistence {
         // still truncates the file. Making it a temp-file-plus-rename is the
         // right next step for a secrets store, and is deliberately left out
         // of this fix rather than folded into it.
-        tokio::fs::write(&path, &ciphertext)
+        tokio::fs::write(&path, ciphertext)
             .await
             .map_err(|e| AgentError::Internal(format!("cannot write vault: {e}")))?;
 
