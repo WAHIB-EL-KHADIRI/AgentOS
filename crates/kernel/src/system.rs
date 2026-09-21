@@ -12,7 +12,7 @@ use agentos_memory::{Embedder, HashingEmbedder, InMemoryStore, MemoryRecord, Mem
 use agentos_registry::{Registry, ServiceDescriptor};
 use agentos_trace::TraceRecorder;
 use agentos_vault::{PermissionSet, Vault, VaultEncryption};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::agent::AgentSpec;
 use crate::error::AgentError;
@@ -87,6 +87,10 @@ pub struct AgentOSSystem {
     pub tool_registry: Arc<ToolRegistry>,
     llm_provider: Arc<RwLock<Option<Arc<dyn LLMProvider>>>>,
     vault_encryption: Option<Arc<VaultEncryption>>,
+    /// Serialises vault persistence. See `persist_vault`: the vault guard is
+    /// released before the disk write, and this mutex is what stops two
+    /// persists from interleaving and leaving a stale snapshot on disk.
+    vault_persist: Arc<Mutex<()>>,
     permission_set: Arc<RwLock<PermissionSet>>,
     agent_logs: Arc<RwLock<AgentLogStore>>,
 }
@@ -146,6 +150,7 @@ impl AgentOSSystem {
             tool_registry: Arc::new(ToolRegistry::new()),
             llm_provider: Arc::new(RwLock::new(configured_llm_provider_from_env())),
             vault_encryption: vault_encryption_from_env(),
+            vault_persist: Arc::new(Mutex::new(())),
             permission_set: Arc::new(RwLock::new(PermissionSet::new())),
             agent_logs: Arc::new(RwLock::new(AgentLogStore::new())),
         }
@@ -660,6 +665,25 @@ impl AgentOSSystem {
 
     /// Persist the vault encrypted, when `AGENTOS_VAULT_KEY` is configured
     /// and a data directory is set. No-op otherwise (in-memory only).
+    ///
+    /// Two locks, in this order, for two different reasons.
+    ///
+    /// `vault_persist` is held for the whole operation, so only one persist
+    /// runs at a time. It is not decoration: the vault guard below is dropped
+    /// before the write, so without this serialisation two persists could take
+    /// their snapshots in one order and land on disk in the other -- the
+    /// later, fuller snapshot overwritten by an earlier, staler one. That is a
+    /// lost secret, which is worse than the stall this method used to cause.
+    /// Because the snapshot and the write it produces happen under the same
+    /// guard, every write is ordered after the snapshot that preceded it, and
+    /// the last snapshot taken is the last one written. It cannot be proved
+    /// away at the call sites either: `persist_vault` is public, and
+    /// `set_secret` calls it from whatever task set the secret.
+    ///
+    /// The vault read guard is held only for serialise-and-encrypt, which is
+    /// CPU work with no await in it, and is released before the disk write.
+    /// Holding it across the write -- as this used to -- stalled every secret
+    /// read and write in the process for the duration of a file write.
     pub async fn persist_vault(&self) -> AgentResult<()> {
         let Some(encryption) = &self.vault_encryption else {
             return Ok(());
@@ -670,8 +694,13 @@ impl AgentOSSystem {
 
         let persistence = Persistence::new(&self.config.data_dir);
         persistence.ensure_dirs().await?;
-        let vault = self.vault.read().await;
-        persistence.save_vault(&vault, encryption).await
+
+        let _persist_guard = self.vault_persist.lock().await;
+        let ciphertext = {
+            let vault = self.vault.read().await;
+            Persistence::encrypt_vault(&vault, encryption)?
+        };
+        persistence.write_vault_ciphertext(&ciphertext).await
     }
 
     /// Load previously persisted secrets into the vault. Returns the number
@@ -1368,6 +1397,143 @@ mod tests {
         let wrong = AgentOSSystem::with_config(config)
             .with_vault_encryption(agentos_vault::VaultEncryption::new());
         assert!(wrong.load_persisted_secrets().await.is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Pins the two structural guarantees of `persist_vault`: persistence is
+    /// serialised, and it is serialised *outside* the vault lock.
+    ///
+    /// Holding `vault_persist` from the test is exactly the state a persist
+    /// already in flight leaves behind. While it is held, a second persist
+    /// must not run to completion -- concurrent persists could otherwise land
+    /// out of order and leave a stale snapshot on disk -- and it must not be
+    /// sitting on the vault guard while it waits, which is what acquiring the
+    /// two locks in the wrong order would do: the stall this change removed,
+    /// reintroduced.
+    ///
+    /// Neither assertion can flake: the fixed code can never finish a persist
+    /// while the mutex is held, and never blocks vault access while queued.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_vault_persistence_is_serialised_outside_the_vault_lock() {
+        use std::time::Duration;
+
+        let dir = std::env::temp_dir().join(format!(
+            "agentos_test_sys_vault_serial_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let config = RuntimeConfig {
+            data_dir: dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+        let key_hex = agentos_vault::VaultEncryption::new().export_key();
+        let system = std::sync::Arc::new(
+            AgentOSSystem::with_config(config.clone())
+                .with_vault_encryption(agentos_vault::VaultEncryption::from_hex(&key_hex).unwrap()),
+        );
+        {
+            let mut vault = system.vault.write().await;
+            vault.put("agent-1", "API_KEY", "sk-serialised");
+        }
+
+        let persist_guard = system.vault_persist.lock().await;
+        let persisting = tokio::spawn({
+            let system = std::sync::Arc::clone(&system);
+            async move { system.persist_vault().await }
+        });
+
+        // Far longer than persisting this vault takes, so a persist that
+        // finishes here finished because nothing was serialising it.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !persisting.is_finished(),
+            "a persist completed while another was in flight: vault persistence is not serialised"
+        );
+
+        // Queued behind the mutex, not behind the vault: secret access still
+        // goes through. `get_secret` takes the vault lock, so it would hang
+        // here if the queued persist were holding it.
+        let secret = tokio::time::timeout(
+            Duration::from_secs(5),
+            system.get_secret("agent-1", "API_KEY"),
+        )
+        .await
+        .expect("a queued persist must not hold the vault lock while it waits");
+        assert_eq!(secret, Some("sk-serialised".to_string()));
+
+        drop(persist_guard);
+        persisting
+            .await
+            .expect("persist task panicked")
+            .expect("persist failed");
+
+        let restored = AgentOSSystem::with_config(config)
+            .with_vault_encryption(agentos_vault::VaultEncryption::from_hex(&key_hex).unwrap());
+        assert_eq!(restored.load_persisted_secrets().await.unwrap(), 1);
+        assert_eq!(
+            restored.get_secret("agent-1", "API_KEY").await,
+            Some("sk-serialised".to_string())
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Concurrent write-through persistence must not lose a secret.
+    ///
+    /// `persist_vault` releases the vault guard before the disk write, so the
+    /// snapshot and the write are no longer one indivisible step. What keeps
+    /// that safe is the dedicated persistence mutex: it orders each write
+    /// after the snapshot that produced it, so the last snapshot taken is the
+    /// last one on disk. Drop that mutex and a persist that started earlier
+    /// can finish later, overwriting a newer vault with a staler one.
+    ///
+    /// This asserts the invariant -- every secret set before the last
+    /// `set_secret` returned is readable from disk -- which holds on every
+    /// scheduling of the fixed code, so the test never flakes. It cannot
+    /// force the bad interleaving of an unserialised implementation, so
+    /// treat it as an invariant guard, not a proof of the race.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_concurrent_secret_writes_all_survive_persistence() {
+        let dir = std::env::temp_dir().join(format!(
+            "agentos_test_sys_vault_concurrent_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let config = RuntimeConfig {
+            data_dir: dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+        let key_hex = agentos_vault::VaultEncryption::new().export_key();
+
+        let system = std::sync::Arc::new(
+            AgentOSSystem::with_config(config.clone())
+                .with_vault_encryption(agentos_vault::VaultEncryption::from_hex(&key_hex).unwrap()),
+        );
+
+        const WRITERS: usize = 16;
+        let mut tasks = Vec::with_capacity(WRITERS);
+        for i in 0..WRITERS {
+            let system = std::sync::Arc::clone(&system);
+            tasks.push(tokio::spawn(async move {
+                system
+                    .set_secret("agent-1", &format!("KEY_{i}"), &format!("secret-{i}"))
+                    .await;
+            }));
+        }
+        for task in tasks {
+            task.await.expect("writer panicked");
+        }
+
+        // Every write returned, so every write must be on disk.
+        let restored = AgentOSSystem::with_config(config)
+            .with_vault_encryption(agentos_vault::VaultEncryption::from_hex(&key_hex).unwrap());
+        assert_eq!(restored.load_persisted_secrets().await.unwrap(), 1);
+        for i in 0..WRITERS {
+            assert_eq!(
+                restored.get_secret("agent-1", &format!("KEY_{i}")).await,
+                Some(format!("secret-{i}")),
+                "KEY_{i} was lost between the vault and the encrypted file"
+            );
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }
