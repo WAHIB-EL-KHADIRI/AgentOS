@@ -2,7 +2,7 @@
 # Base images are pinned by digest, not tag: a tag is mutable and can be
 # repointed at a different image. Dependabot's docker ecosystem keeps these
 # digests current, so pinning does not mean sitting on unpatched CVEs.
-FROM rust:1-slim-bookworm@sha256:ebd900bae66fd508b466cef82d64a83a5fb34682e4c8b2797a42908bddc95a57 AS builder
+FROM rust:1-slim-bookworm@sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730 AS builder
 
 WORKDIR /app
 COPY . .
