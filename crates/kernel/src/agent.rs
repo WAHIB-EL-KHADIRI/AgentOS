@@ -67,10 +67,44 @@ pub struct AgentSpec {
     pub max_restarts: u32,
     #[serde(default = "default_heartbeat_timeout")]
     pub heartbeat_timeout_secs: u64,
+    #[serde(
+        default = "default_readiness_timeout",
+        skip_serializing_if = "is_default_readiness_timeout"
+    )]
+    pub readiness_timeout_secs: u64,
 }
 
 const fn default_heartbeat_timeout() -> u64 {
     30
+}
+
+const fn default_readiness_timeout() -> u64 {
+    30
+}
+
+fn is_default_readiness_timeout(value: &u64) -> bool {
+    *value == default_readiness_timeout()
+}
+
+/// Opt-in async readiness contract for agent startup.
+///
+/// This is a kernel lifecycle API, deliberately separate from [`crate::RuntimeTool`].
+/// Agents that declare nothing use [`crate::Supervisor::spawn`] and reach `Running`
+/// exactly as before. Opt-in callers use `spawn_with_readiness`, which awaits this
+/// hook before the agent becomes a running handle.
+///
+/// The readiness object itself is never serialized into [`AgentSpec`]; only
+/// `readiness_timeout_secs` travels with the spec.
+#[async_trait::async_trait]
+pub trait AgentReadiness: Send + Sync {
+    async fn wait_until_ready(&self, spec: &AgentSpec) -> Result<(), String>;
+}
+
+#[async_trait::async_trait]
+impl<T: AgentReadiness + ?Sized> AgentReadiness for std::sync::Arc<T> {
+    async fn wait_until_ready(&self, spec: &AgentSpec) -> Result<(), String> {
+        (**self).wait_until_ready(spec).await
+    }
 }
 
 impl AgentSpec {
@@ -82,6 +116,7 @@ impl AgentSpec {
             capabilities: Vec::new(),
             max_restarts: 5,
             heartbeat_timeout_secs: 30,
+            readiness_timeout_secs: default_readiness_timeout(),
         }
     }
 }
