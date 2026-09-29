@@ -1,0 +1,9 @@
+# Replaying the example journals the replayed run next to it, and may write
+# traces. Keep only the shipped recording under version control.
+/*
+!/.gitignore
+!/README.md
+!/agentos.toml
+!/journals/
+/journals/*
+!/journals/demo_agent.json
