@@ -41,7 +41,7 @@ include = ["agentos*"]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
-    "ruff>=0.16.7",
+    "ruff>=0.16.8",
     "build>=1.6.1",
 ]
 
