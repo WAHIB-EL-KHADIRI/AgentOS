@@ -1,4 +1,4 @@
-export type AgentStatus = "running" | "stopped" | "error" | "starting";
+export type AgentStatus = "running" | "stopped" | "error" | "starting" | "created";
 
 export interface AgentInfo {
   id: string;

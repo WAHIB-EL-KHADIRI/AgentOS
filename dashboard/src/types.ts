@@ -1,4 +1,4 @@
-export type AgentStatus = "running" | "stopped" | "error" | "starting";
+export type AgentStatus = "running" | "stopped" | "error" | "starting" | "created";
 export type ConnectionState = "connecting" | "live" | "reconnecting" | "disconnected";
 export type EventType =
   "thought" | "tool_call" | "tool_result" | "error" | "state_change" | "message";

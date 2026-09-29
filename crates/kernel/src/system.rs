@@ -14,7 +14,7 @@ use agentos_trace::TraceRecorder;
 use agentos_vault::{PermissionSet, Vault, VaultEncryption};
 use tokio::sync::RwLock;
 
-use crate::agent::AgentSpec;
+use crate::agent::{AgentReadiness, AgentSpec};
 use crate::error::AgentError;
 use crate::events::{EventBus, SystemEventType};
 use crate::handle::AgentHandle;
@@ -200,6 +200,57 @@ impl AgentOSSystem {
             .await;
 
         // Notify plugins
+        self.agent_hooks.on_spawned(self, &agent_id).await;
+
+        Ok(handle)
+    }
+
+    /// Opt-in readiness spawn on a full system. Mirrors [`Self::spawn_agent`]
+    /// on success; on readiness failure nothing is registered, traced, logged,
+    /// or emitted — the returned error is the spawn contract.
+    pub async fn spawn_agent_with_readiness<R>(
+        &self,
+        spec: AgentSpec,
+        readiness: R,
+    ) -> AgentResult<AgentHandle>
+    where
+        R: AgentReadiness,
+    {
+        let agent_id = spec.id.clone();
+        let agent_name = spec.name.clone();
+        let capabilities = spec.capabilities.clone();
+
+        let handle = self
+            .supervisor
+            .spawn_with_readiness(spec, readiness)
+            .await?;
+
+        {
+            let mut reg = self.registry.write().await;
+            let desc = ServiceDescriptor::new(&agent_id, "local").with_capabilities(capabilities);
+            reg.register_or_update(desc);
+        }
+
+        {
+            let mut trace = self.trace_recorder.write().await;
+            trace.record_checkpoint(&agent_id, format!("Agent '{}' spawned", agent_name));
+        }
+
+        self.log_event(
+            &agent_id,
+            "spawned",
+            &format!("Agent '{}' started", agent_name),
+        )
+        .await;
+
+        self.event_bus
+            .emit(
+                SystemEventType::AgentSpawned,
+                Some(agent_id.to_string()),
+                format!("Agent '{}' spawned", agent_name),
+            )
+            .await;
+
         self.agent_hooks.on_spawned(self, &agent_id).await;
 
         Ok(handle)

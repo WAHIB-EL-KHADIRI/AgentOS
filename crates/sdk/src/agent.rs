@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use agentos_kernel::{
     agent::{AgentId, AgentSpec, AgentState},
-    AgentOSSystem, Supervisor,
+    AgentOSSystem, AgentReadiness, Supervisor,
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -89,6 +89,7 @@ impl AgentHandle {
 pub struct AgentBuilder {
     id_hint: String,
     config: AgentConfig,
+    readiness_timeout_secs: u64,
     tools: Vec<Arc<dyn Tool>>,
 }
 
@@ -101,6 +102,7 @@ impl AgentBuilder {
                 ..Default::default()
             },
             id_hint: id,
+            readiness_timeout_secs: 30,
             tools: Vec::new(),
         }
     }
@@ -129,6 +131,11 @@ impl AgentBuilder {
 
     pub fn max_restarts(mut self, n: u32) -> Self {
         self.config.max_restarts = n;
+        self
+    }
+
+    pub fn readiness_timeout_secs(mut self, secs: u64) -> Self {
+        self.readiness_timeout_secs = secs;
         self
     }
 
@@ -179,6 +186,59 @@ impl AgentBuilder {
         Ok(AgentHandle::from_kernel(handle))
     }
 
+    /// Opt-in readiness spawn on a bare supervisor. Existing spawn paths are
+    /// unchanged; readiness itself is a kernel lifecycle API, never a `Tool`.
+    pub async fn spawn_on_supervisor_with_readiness<R>(
+        self,
+        supervisor: &Supervisor,
+        readiness: R,
+    ) -> SdkResult<AgentHandle>
+    where
+        R: AgentReadiness,
+    {
+        let id = self.id_hint.clone();
+        let (spec, tools) = self.into_parts(id);
+        if !tools.is_empty() {
+            tracing::warn!(
+                tools = tools.len(),
+                "tools registered on a bare supervisor cannot execute; use spawn_on_system"
+            );
+        }
+        let handle = supervisor.spawn_with_readiness(spec, readiness).await?;
+        tracing::info!(
+            agent_id = %handle.id,
+            tools = tools.len(),
+            "agent spawned via SDK supervisor with readiness"
+        );
+        Ok(AgentHandle::from_kernel(handle))
+    }
+
+    /// Opt-in readiness spawn on a full AgentOS system.
+    pub async fn spawn_on_system_with_readiness<R>(
+        self,
+        system: &AgentOSSystem,
+        readiness: R,
+    ) -> SdkResult<AgentHandle>
+    where
+        R: AgentReadiness,
+    {
+        let id = self.id_hint.clone();
+        let (spec, tools) = self.into_parts(id);
+        let tool_count = tools.len();
+        let handle = system.spawn_agent_with_readiness(spec, readiness).await?;
+        for tool in tools {
+            system
+                .register_tool(&handle.id, Arc::new(crate::tool::SdkToolAdapter::new(tool)))
+                .await;
+        }
+        tracing::info!(
+            agent_id = %handle.id,
+            tools = tool_count,
+            "agent spawned via SDK system with readiness"
+        );
+        Ok(AgentHandle::from_kernel(handle))
+    }
+
     pub async fn spawn(self) -> SdkResult<AgentHandle> {
         let id = Uuid::new_v4().to_string();
         let state = Arc::new(Mutex::new(AgentState::Created));
@@ -211,6 +271,7 @@ impl AgentBuilder {
             capabilities,
             max_restarts: self.config.max_restarts,
             heartbeat_timeout_secs: self.config.heartbeat_timeout_secs,
+            readiness_timeout_secs: self.readiness_timeout_secs,
         };
         (spec, self.tools)
     }

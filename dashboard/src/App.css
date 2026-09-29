@@ -406,7 +406,8 @@ body,
   color: var(--status-error);
 }
 
-.agent-card__status--starting {
+.agent-card__status--starting,
+.agent-card__status--created {
   background: var(--tint-warn-fill);
   color: var(--status-warn);
 }
@@ -490,7 +491,8 @@ body,
   color: var(--status-error);
 }
 
-.agent-detail__badge--starting {
+.agent-detail__badge--starting,
+.agent-detail__badge--created {
   background: var(--tint-warn-fill);
   color: var(--status-warn);
 }
