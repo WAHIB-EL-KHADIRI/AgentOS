@@ -6,6 +6,7 @@ This directory shows how to use AgentOS in different scenarios.
 
 - [`simple_agent.toml`](simple_agent.toml) - minimal TOML agent configuration
 - [`simple_agent.yaml`](simple_agent.yaml) - minimal YAML-style agent manifest
+- [`replay/`](replay/) - a recorded session you can replay offline with no API key
 
 ## Rust Examples
 
