@@ -15,7 +15,7 @@ RUN cp target/release/agentOS /agentOS
 RUN mkdir -p /templates && cp -r templates/* /templates/
 
 # Stage 2: Supervisor monitor image
-FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS supervisor
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS supervisor
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
@@ -37,7 +37,7 @@ ENV RUST_LOG=info \
 CMD ["agentOS", "supervisor"]
 
 # Stage 3: Full runtime
-FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
