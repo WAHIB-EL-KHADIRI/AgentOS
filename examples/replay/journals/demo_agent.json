@@ -1,0 +1,22 @@
+{
+  "agent_id": "demo_agent",
+  "agent_name": "demo-agent",
+  "prompt": "You are a release assistant. Answer in one short paragraph and name the risk first.",
+  "capabilities": [],
+  "model": "scripted-offline",
+  "user_input": "Is it safe to ship v0.2 if the migration test is flaky?",
+  "exchanges": [
+    {
+      "request_fingerprint": "v2:2daaa0575ac115d8",
+      "checkpoint_id": "c52a1818-e2a4-4a88-9fc8-83fca16cf9bc",
+      "response": {
+        "model": "scripted-offline",
+        "content": "Risk first: a flaky migration test means you do not know whether the migration is safe, only that it sometimes passes. Hold the release, rerun the test in a loop to find the failing order, and ship once it passes consistently or the flake is proven unrelated to the migration.",
+        "tool_calls": [],
+        "finish_reason": "stop"
+      }
+    }
+  ],
+  "tool_invocations": [],
+  "recorded_at_ms": 1790680426006
+}
