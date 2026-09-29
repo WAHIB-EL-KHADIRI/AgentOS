@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agentos_bus::{AgentBusTrait, InMemoryBus};
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::agent::{
     run_agent_loop_with_observers, Agent, AgentId, AgentSpec, LifecycleEvent, SUPERVISOR_TICK,
@@ -23,6 +23,11 @@ pub struct Supervisor {
     lifecycle_tx: mpsc::Sender<LifecycleEvent>,
     bus: Option<Arc<InMemoryBus>>,
     max_agents: usize,
+    /// Consecutive restart-dispatch failures, keyed by agent id. An entry
+    /// exists only while an agent is stale *and* the supervisor cannot hand it
+    /// a restart command, which keeps a single transient failure
+    /// distinguishable from an agent that is permanently unreachable.
+    restart_failures: Arc<RwLock<HashMap<AgentId, u32>>>,
 }
 
 impl Default for Supervisor {
@@ -40,6 +45,7 @@ impl Supervisor {
             lifecycle_tx,
             bus: None,
             max_agents: 100,
+            restart_failures: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -177,19 +183,82 @@ impl Supervisor {
     }
 
     pub async fn monitor(&self) {
-        let mut interval = tokio::time::interval(SUPERVISOR_TICK);
+        self.monitor_with_tick(SUPERVISOR_TICK).await;
+    }
+
+    pub(crate) async fn monitor_with_tick(&self, tick: Duration) {
+        let mut interval = tokio::time::interval(tick);
         interval.tick().await;
 
         loop {
             interval.tick().await;
-            let now = current_time_secs();
-            let stale = self.stale_handles_at(now).await;
+            self.supervise_once_at(current_time_secs()).await;
+        }
+    }
 
-            for handle in stale {
-                warn!(agent_id = %handle.id, "agent heartbeat timeout, restarting");
-                let _ = handle.restart().await;
+    /// One supervision pass: restart every agent whose heartbeat is stale.
+    ///
+    /// Dispatch is non-blocking by design. Restart commands go into each
+    /// agent's bounded channel, and an agent that has stopped draining that
+    /// channel would otherwise block this pass — and therefore every
+    /// subsequent tick — for the remaining life of the process. Such an agent
+    /// is logged and recorded instead, and the pass moves on.
+    pub(crate) async fn supervise_once_at(&self, now: u64) {
+        let stale = self.stale_handles_at(now).await;
+        let mut failures = self.restart_failures.write().await;
+
+        for handle in &stale {
+            warn!(agent_id = %handle.id, "agent heartbeat timeout, restarting");
+
+            match handle.try_restart() {
+                Ok(()) => {
+                    if failures.remove(&handle.id).is_some() {
+                        info!(
+                            agent_id = %handle.id,
+                            "restart command accepted again after earlier failures"
+                        );
+                    }
+                }
+                Err(error) => {
+                    let streak = failures.entry(handle.id.clone()).or_insert(0);
+                    *streak += 1;
+                    error!(
+                        agent_id = %handle.id,
+                        consecutive_failures = *streak,
+                        %error,
+                        "could not dispatch restart; this agent is unsupervised, other agents continue"
+                    );
+
+                    // Make the first failure of a streak visible to lifecycle
+                    // watchers too, not only to log readers. try_send because
+                    // the lifecycle channel is bounded as well.
+                    if *streak == 1 {
+                        let _ = handle.lifecycle_tx().try_send(LifecycleEvent::Degraded(
+                            handle.id.clone(),
+                            format!("restart could not be dispatched: {error}"),
+                        ));
+                    }
+                }
             }
         }
+
+        // Drop streaks for agents that recovered or are no longer stale (a
+        // removed agent never reappears in `stale`), so the map stays bounded
+        // by the number of currently unreachable agents.
+        let stale_ids: HashSet<&AgentId> = stale.iter().map(|handle| &handle.id).collect();
+        failures.retain(|id, _| stale_ids.contains(id));
+    }
+
+    /// Number of consecutive supervision passes that could not hand agent
+    /// `id` a restart command. Zero means the last attempt was accepted, or
+    /// that no restart has been attempted.
+    pub async fn restart_failure_streak(&self, id: &str) -> u32 {
+        self.restart_failures
+            .read()
+            .await
+            .get(id)
+            .copied()
+            .unwrap_or(0)
     }
 
     async fn stale_handles_at(&self, now: u64) -> Vec<AgentHandle> {
@@ -264,6 +333,7 @@ impl Clone for Supervisor {
             lifecycle_tx: self.lifecycle_tx.clone(),
             bus: self.bus.clone(),
             max_agents: self.max_agents,
+            restart_failures: Arc::clone(&self.restart_failures),
         }
     }
 }
@@ -299,6 +369,104 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         handle.state().await
+    }
+
+    /// An agent that is stale almost immediately and may be restarted many
+    /// times, so a test can drive repeated supervision passes.
+    fn stale_spec(id: &str) -> AgentSpec {
+        let mut spec = AgentSpec::new(id, id);
+        spec.heartbeat_timeout_secs = 1;
+        spec.max_restarts = u32::MAX;
+        spec
+    }
+
+    /// Stops an agent loop from draining its command channel and then fills
+    /// that channel. The loop blocks on the state mutex as soon as it touches
+    /// agent state, so holding the returned guard keeps the agent wedged for
+    /// as long as the test needs it.
+    async fn wedge_agent(handle: &AgentHandle) -> tokio::sync::OwnedMutexGuard<AgentState> {
+        let guard = handle.state_arc().lock_owned().await;
+
+        for _ in 0..512 {
+            match tokio::time::timeout(Duration::from_millis(50), handle.restart()).await {
+                Ok(Ok(())) => continue,
+                Ok(Err(error)) => panic!("wedged agent channel closed early: {error}"),
+                Err(_) => return guard,
+            }
+        }
+
+        panic!("command channel never filled up");
+    }
+
+    /// A single supervision pass must not be stalled by one agent that has
+    /// stopped draining its bounded command channel: the other stale agent
+    /// still gets restarted, and the unreachable one is recorded.
+    #[tokio::test]
+    async fn test_wedged_agent_does_not_stall_a_supervision_pass() {
+        let sup = Supervisor::new();
+        let wedged = sup.spawn(stale_spec("wedged-pass")).await.unwrap();
+        let healthy = sup.spawn(stale_spec("healthy-pass")).await.unwrap();
+
+        let _guard = wedge_agent(&wedged).await;
+
+        let now = healthy.last_heartbeat() + 60;
+        let pass = tokio::time::timeout(Duration::from_secs(2), sup.supervise_once_at(now)).await;
+        assert!(
+            pass.is_ok(),
+            "one wedged agent must not stall a supervision pass"
+        );
+
+        wait_until_restart_count(&healthy, 1).await;
+        assert!(
+            sup.restart_failure_streak("wedged-pass").await >= 1,
+            "an agent that cannot be restarted must be marked, not silently skipped"
+        );
+        assert_eq!(sup.restart_failure_streak("healthy-pass").await, 0);
+    }
+
+    /// The same failure driven through the real supervision loop: a wedged
+    /// agent must not stop the loop from ticking, so a second stale agent
+    /// keeps being health-checked and restarted.
+    #[tokio::test]
+    async fn test_wedged_agent_does_not_stop_the_supervision_loop() {
+        let sup = Supervisor::new();
+        let wedged = sup.spawn(stale_spec("wedged-loop")).await.unwrap();
+        let healthy = sup.spawn(stale_spec("healthy-loop")).await.unwrap();
+
+        let _guard = wedge_agent(&wedged).await;
+
+        // heartbeat_timeout_secs is 1 and neither agent beats before 5s, so
+        // both are stale once two wall-clock seconds have passed.
+        tokio::time::sleep(Duration::from_millis(2_100)).await;
+
+        let monitored = sup.clone();
+        let monitor_task =
+            tokio::spawn(
+                async move { monitored.monitor_with_tick(Duration::from_millis(50)).await },
+            );
+
+        // A loop that ticks exactly once could still restart the healthy agent
+        // once, depending on the order the stale set happens to iterate in.
+        // Repeated restarts are only possible if the loop keeps ticking.
+        let mut restarts = 0;
+        for _ in 0..60 {
+            restarts = healthy.restart_count();
+            if restarts >= 3 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        monitor_task.abort();
+
+        assert!(
+            restarts >= 3,
+            "supervision loop stopped ticking: healthy agent was restarted {restarts} time(s)"
+        );
+        assert!(
+            sup.restart_failure_streak("wedged-loop").await >= 2,
+            "repeated dispatch failures must accumulate so they are distinguishable from a transient one"
+        );
     }
 
     #[tokio::test]
