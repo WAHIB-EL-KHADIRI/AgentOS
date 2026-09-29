@@ -1,0 +1,5 @@
+# Runtime config for the shipped replay example. Paths are relative to the
+# directory you run agentOS from, so run it from the repository root:
+#
+#   cargo run -p agentos-cli -- replay --session demo_agent --config examples/replay/agentos.toml
+data_dir = "examples/replay"
