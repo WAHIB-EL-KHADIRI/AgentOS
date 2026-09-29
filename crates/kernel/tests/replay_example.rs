@@ -1,17 +1,6 @@
-//! The recorded session shipped in `examples/replay/` is what a first-time
-//! visitor replays to see the headline feature without an API key. These tests
-//! keep it honest in both directions.
+//! Keeps the recorded session in `examples/replay/` replaying with zero drift.
 //!
-//! - It must replay with zero drift in a fresh process. The journal was written
-//!   by an earlier build, so this is the one test in the workspace that fails
-//!   when determinism breaks *across builds*: a change to the request
-//!   fingerprint, to how the request is assembled, or to the journal schema
-//!   passes every same-process record-then-replay test and still breaks every
-//!   journal already on disk.
-//! - It must be exactly what the recording path produces today, so it cannot
-//!   be a hand-written file that merely looks like a recording.
-//!
-//! Regenerate it (after an intentional format change) with:
+//! Regenerate it after an intentional format change with:
 //!
 //! ```text
 //! AGENTOS_BLESS_REPLAY_EXAMPLE=1 cargo test -p agentos-kernel --test replay_example -- --test-threads=1

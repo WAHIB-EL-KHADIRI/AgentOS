@@ -25,7 +25,7 @@ that reproduces the recorded request fingerprints and final answer exactly.
 It is not hand-written. The test
 [`crates/kernel/tests/replay_example.rs`](../../crates/kernel/tests/replay_example.rs)
 re-records it on every CI run and fails if the committed copy differs, and
-replays it in a fresh process and fails on any drift. If the journal format or
+replays it in a fresh system and fails on any drift. If the journal format or
 the request fingerprint ever changes, that test fails before your existing
 journals silently stop replaying.
 
@@ -36,3 +36,7 @@ free; see [the CLI reference](../../docs/cli-reference.md#you-need-a-provider-to
 
 Replaying writes the replayed run's own journal next to the example
 (`journals/demo_agent_replay_<timestamp>.json`). Those files are ignored by git.
+
+If `AGENTOS_DATA_DIR` is set in your environment it overrides the `data_dir` in
+this config, and the command reports no recorded session. Unset it to run the
+example.
