@@ -39,6 +39,11 @@ no session for `replay --session` or `fork` to use. `AGENTOS_LLM_PROVIDER=ollama
 is the free local way to record one; see
 [the CLI reference](cli-reference.md#you-need-a-provider-to-record-one).
 
+To replay without recording anything first, use the session shipped in
+[`examples/replay/`](../examples/replay/README.md):
+`agentOS replay --session demo_agent --config examples/replay/agentos.toml`,
+run from the repository root.
+
 ## Design Goal
 
 The developer should be able to answer:
