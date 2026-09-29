@@ -28,8 +28,13 @@ usage() {
 
 require_agentos() {
   if ! command -v "$AGENTOS_BIN" >/dev/null 2>&1; then
+    # Cargo writes to CARGO_TARGET_DIR when it is set, so assuming ./target
+    # made this report "not found" straight after a build that succeeded,
+    # which sends people looking for the wrong problem.
+    target_dir="${CARGO_TARGET_DIR:-./target}"
+
     if [ "$AGENTOS_BIN" = "agentOS" ]; then
-      for candidate in ./target/debug/agentOS ./target/debug/agentOS.exe; do
+      for candidate in "$target_dir/debug/agentOS" "$target_dir/debug/agentOS.exe"; do
         if [ -f "$candidate" ]; then
           AGENTOS_BIN="$candidate"
           return 0
@@ -37,10 +42,10 @@ require_agentos() {
       done
     fi
 
-    echo "agentOS was not found in PATH."
+    echo "agentOS was not found in PATH, nor at $target_dir/debug/agentOS."
     echo "Build or install it first:"
     echo "  cargo build --workspace"
-    echo "  AGENTOS_BIN=./target/debug/agentOS bash scripts/demo.sh --check"
+    echo "  AGENTOS_BIN=$target_dir/debug/agentOS bash scripts/demo.sh --check"
     echo "  cargo install --path crates/cli"
     exit 1
   fi

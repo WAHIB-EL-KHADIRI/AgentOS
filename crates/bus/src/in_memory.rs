@@ -69,10 +69,18 @@ impl InMemoryBus {
 #[async_trait]
 impl AgentBusTrait for InMemoryBus {
     async fn publish(&self, mut envelope: AgentEnvelope) -> BusResult<String> {
-        let mut next_id = self.next_id.lock().await;
-        *next_id += 1;
+        // The id counter is held for the increment and nothing else. It used
+        // to stay locked across `recipients_for`, which waits on the
+        // subscription lock: every publisher on the bus then queued behind
+        // one subscriber lookup, turning an unrelated lock into a global
+        // publish bottleneck.
+        let sequence = {
+            let mut next_id = self.next_id.lock().await;
+            *next_id += 1;
+            *next_id
+        };
         if envelope.id.is_empty() {
-            envelope.id = format!("msg_{}", next_id);
+            envelope.id = format!("msg_{}", sequence);
         }
         let id = envelope.id.clone();
         let recipients = self.recipients_for(&envelope).await;
@@ -224,6 +232,58 @@ mod tests {
             }
         }
         panic!("should have returned BusFull");
+    }
+
+    /// `publish` must not hold the id counter across the subscriber lookup.
+    ///
+    /// The test holds the subscription lock, which parks any broadcast
+    /// publish inside `recipients_for`. A targeted publish never consults
+    /// subscriptions, so it must still complete -- and it could not while the
+    /// parked broadcaster was still holding `next_id`.
+    ///
+    /// `start_paused` keeps this deterministic: the clock only advances when
+    /// every task is blocked, so a regression fails immediately on a logical
+    /// timeout and a healthy run never waits at all.
+    #[tokio::test(start_paused = true)]
+    async fn test_publish_does_not_hold_the_id_lock_across_recipient_lookup() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let bus = Arc::new(InMemoryBus::new());
+        bus.subscribe("charlie", &["broadcast"]).await;
+
+        let subscriptions = bus.subscriptions.lock().await;
+
+        let broadcaster = tokio::spawn({
+            let bus = Arc::clone(&bus);
+            async move {
+                bus.publish(AgentEnvelope::new("alice", "*", "broadcast", vec![]))
+                    .await
+            }
+        });
+
+        // Let the broadcaster run until it parks on the subscription lock, so
+        // the id lock is genuinely contended if it is still being held.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+
+        let id = tokio::time::timeout(
+            Duration::from_secs(5),
+            bus.publish(AgentEnvelope::new("alice", "bob", "direct", vec![])),
+        )
+        .await
+        .expect("a targeted publish must not queue behind an unrelated subscriber lookup")
+        .expect("targeted publish failed");
+        assert!(id.starts_with("msg_"));
+
+        drop(subscriptions);
+        broadcaster
+            .await
+            .expect("broadcaster panicked")
+            .expect("broadcast publish failed");
+        assert_eq!(bus.drain_for("charlie").await.len(), 1);
+        assert_eq!(bus.drain_for("bob").await.len(), 1);
     }
 
     #[tokio::test]

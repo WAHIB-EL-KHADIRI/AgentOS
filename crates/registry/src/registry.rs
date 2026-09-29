@@ -8,6 +8,24 @@ pub type RegistryResult<T> = Result<T, RegistryError>;
 const MAX_ENDPOINT_LEN: usize = 1024;
 const MAX_NAME_LEN: usize = 256;
 
+/// Truncate to at most `max_bytes`, stepping back to the nearest character
+/// boundary.
+///
+/// The limits above are byte counts, but `String::truncate` panics when the
+/// index lands inside a multi-byte character. Any text that is not pure ASCII
+/// will eventually put one there, so cutting at the raw limit aborts the
+/// process on ordinary Arabic, CJK or emoji content.
+fn truncate_on_char_boundary(s: &mut String, max_bytes: usize) {
+    if s.len() <= max_bytes {
+        return;
+    }
+    let mut end = max_bytes;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s.truncate(end);
+}
+
 #[derive(Debug, Error)]
 pub enum RegistryError {
     #[error("service '{0}' already registered")]
@@ -42,12 +60,8 @@ impl ServiceDescriptor {
     pub fn new(name: impl Into<String>, endpoint: impl Into<String>) -> Self {
         let mut endpoint: String = endpoint.into();
         let mut name: String = name.into();
-        if endpoint.len() > MAX_ENDPOINT_LEN {
-            endpoint.truncate(MAX_ENDPOINT_LEN);
-        }
-        if name.len() > MAX_NAME_LEN {
-            name.truncate(MAX_NAME_LEN);
-        }
+        truncate_on_char_boundary(&mut endpoint, MAX_ENDPOINT_LEN);
+        truncate_on_char_boundary(&mut name, MAX_NAME_LEN);
         Self {
             name,
             endpoint,
@@ -250,5 +264,26 @@ mod tests {
             .register(ServiceDescriptor::new("b", "addr2"))
             .unwrap();
         assert_eq!(registry.list().len(), 2);
+    }
+
+    // Arabic letters are two bytes each. The single ASCII byte in front makes
+    // every following character start at an odd offset, so the even byte limit
+    // lands inside one of them -- which is what `String::truncate` panics on.
+    #[test]
+    fn oversized_non_ascii_name_and_endpoint_do_not_panic() {
+        let name = format!("a{}", "م".repeat(MAX_NAME_LEN));
+        let endpoint = format!("a{}", "م".repeat(MAX_ENDPOINT_LEN));
+        assert!(!name.is_char_boundary(MAX_NAME_LEN));
+        assert!(!endpoint.is_char_boundary(MAX_ENDPOINT_LEN));
+
+        let descriptor = ServiceDescriptor::new(name.clone(), endpoint.clone());
+
+        assert!(descriptor.name.len() <= MAX_NAME_LEN);
+        assert!(descriptor.endpoint.len() <= MAX_ENDPOINT_LEN);
+        // A prefix, so the cut trimmed rather than mangled. Checking
+        // is_char_boundary(len()) would prove nothing - the end of a String is
+        // always a boundary.
+        assert!(name.starts_with(&descriptor.name));
+        assert!(endpoint.starts_with(&descriptor.endpoint));
     }
 }
