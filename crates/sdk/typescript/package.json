@@ -35,9 +35,9 @@
   },
   "devDependencies": {
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.2"
   },
   "dependencies": {
-    "eventsource": "^5.1.1"
+    "eventsource": "^5.1.2"
   }
 }
