@@ -2213,6 +2213,9 @@ async fn replay_session_command(agent_id: &str, config_path: &str) -> anyhow::Re
     }
 
     system.shutdown_all().await;
+    if !drifts.is_empty() {
+        anyhow::bail!("{} drift finding(s) against the recording", drifts.len());
+    }
     Ok(())
 }
 

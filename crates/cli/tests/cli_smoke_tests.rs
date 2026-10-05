@@ -127,3 +127,68 @@ fn fork_unknown_checkpoint_reports_clear_error() {
     assert!(!no_args.status.success(), "{no_args_text}");
     assert!(no_args_text.contains("--session"), "{no_args_text}");
 }
+
+fn replay_example_fixture(name: &str, tamper: bool) -> (std::path::PathBuf, std::path::PathBuf) {
+    let cwd = temp_dir(&format!("{name}_cwd"));
+    let home = temp_dir(&format!("{name}_home"));
+    let journals = cwd.join("data").join("journals");
+    std::fs::create_dir_all(&journals).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/replay/journals/demo_agent.json");
+    let mut journal = std::fs::read_to_string(source).unwrap();
+    if tamper {
+        assert!(journal.contains("\"v2:"), "fixture layout changed");
+        journal = journal.replacen("\"v2:", "\"v2:0", 1);
+    }
+    std::fs::write(journals.join("demo_agent.json"), journal).unwrap();
+    std::fs::write(cwd.join("agentos.toml"), "data_dir = \"data\"\n").unwrap();
+    (cwd, home)
+}
+
+#[test]
+fn replay_of_the_shipped_example_exits_zero() {
+    let (cwd, home) = replay_example_fixture("replay_ok", false);
+
+    let output = run_agentos(
+        &[
+            "replay",
+            "--session",
+            "demo_agent",
+            "--config",
+            "agentos.toml",
+        ],
+        &cwd,
+        &home,
+    );
+    let text = output_text(&output);
+    let _ = std::fs::remove_dir_all(&cwd);
+    let _ = std::fs::remove_dir_all(&home);
+
+    assert!(output.status.success(), "{text}");
+    assert!(text.contains("no drift against the recording"), "{text}");
+}
+
+#[test]
+fn replay_with_drift_exits_nonzero() {
+    let (cwd, home) = replay_example_fixture("replay_drift", true);
+
+    let output = run_agentos(
+        &[
+            "replay",
+            "--session",
+            "demo_agent",
+            "--config",
+            "agentos.toml",
+        ],
+        &cwd,
+        &home,
+    );
+    let text = output_text(&output);
+    let _ = std::fs::remove_dir_all(&cwd);
+    let _ = std::fs::remove_dir_all(&home);
+
+    assert!(!output.status.success(), "{text}");
+    assert!(text.contains("drift detected"), "{text}");
+}

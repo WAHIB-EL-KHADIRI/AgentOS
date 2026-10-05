@@ -98,6 +98,18 @@ so a run without one skips the LLM step and writes no session. Replaying needs
 nothing. `AGENTOS_LLM_PROVIDER=ollama` records locally for free; see
 [the CLI reference](docs/cli-reference.md#you-need-a-provider-to-record-one).
 
+To see a replay before configuring anything, replay the session shipped in
+[`examples/replay/`](examples/replay/):
+
+```bash
+cargo run -p agentos-cli -- replay --session demo_agent --config examples/replay/agentos.toml
+```
+
+That recording came from a scripted offline provider, not a real model — the
+example shows the replay side. A test re-records it and replays it in a fresh
+process on every CI run, so a change that breaks replay of existing journals
+fails CI instead of shipping.
+
 Branching a checkpoint into an alternate timeline works the same way. The
 journal records per-exchange checkpoints as fork anchors, and `agentOS fork`
 replays the prefix up to the checkpoint against the recording, then continues
@@ -148,8 +160,8 @@ run -> ps -> logs -> trace -> replay
 Start with:
 
 - Demo guide: [`docs/demo.md`](docs/demo.md)
-- Demo config: [`.agentos/demo/agentos.demo.toml`](.agentos/demo/agentos.demo.toml)
-- Demo script: [`scripts/demo.sh`](scripts/demo.sh)
+- Demo script: [`scripts/demo.sh`](scripts/demo.sh) (writes its runtime config
+  to `.agentos/demo/agentos.demo.toml`, which is not committed)
 
 Smoke-check the demo without inventing output:
 

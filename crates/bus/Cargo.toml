@@ -24,5 +24,10 @@ bytes = "1"
 tokio-tungstenite = "0.30"
 futures-util = "0.3"
 
+[dev-dependencies]
+# `test-util` gives the tests a paused clock, so a lock-contention
+# regression fails on a logical timeout instead of a wall-clock one.
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true
