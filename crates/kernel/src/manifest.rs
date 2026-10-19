@@ -51,7 +51,7 @@ impl AgentManifest {
         let content = std::fs::read_to_string(path)
             .map_err(|e| AgentError::ConfigError(format!("cannot read '{}': {}", path, e)))?;
 
-        serde_yaml::from_str::<AgentManifest>(&content)
+        serde_norway::from_str::<AgentManifest>(&content)
             .map_err(|e| AgentError::ConfigError(format!("invalid manifest in '{}': {}", path, e)))
     }
 
