@@ -8,7 +8,8 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{error, info, warn};
 
 use crate::agent::{
-    run_agent_loop_with_observers, Agent, AgentId, AgentSpec, LifecycleEvent, SUPERVISOR_TICK,
+    run_agent_loop_with_observers, Agent, AgentId, AgentReadiness, AgentSpec, LifecycleEvent,
+    SUPERVISOR_TICK,
 };
 use crate::error::{AgentError, AgentResult};
 use crate::handle::AgentHandle;
@@ -16,9 +17,52 @@ use crate::handle::AgentHandle;
 const AGENT_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+/// RAII-owned reservation for a readiness-pending spawn.
+///
+/// The id is inserted into the shared pending set at admission time and removed
+/// exactly once: either explicitly on the success path (followed by `defuse`,
+/// so `Drop` becomes a no-op) or by `Drop` on every other exit — probe failure,
+/// timeout, `Agent::start` failure, early return, or future cancellation.
+/// `Drop` only locks a short synchronous mutex, so no async cleanup is needed.
+#[derive(Debug)]
+struct PendingReservation {
+    pending: Arc<std::sync::Mutex<HashSet<AgentId>>>,
+    id: AgentId,
+    committed: bool,
+}
+
+impl PendingReservation {
+    fn new(pending: Arc<std::sync::Mutex<HashSet<AgentId>>>, id: AgentId) -> Self {
+        Self {
+            pending,
+            id,
+            committed: false,
+        }
+    }
+
+    fn defuse(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for PendingReservation {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.remove(&self.id);
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Supervisor {
     handles: Arc<RwLock<HashMap<AgentId, AgentHandle>>>,
+    /// Ids reserved by in-flight `spawn_with_readiness` calls. Pending agents
+    /// are not visible via `get`/`list`/health; they only count toward
+    /// duplicate and `max_agents` checks until they convert or release.
+    pending: Arc<std::sync::Mutex<HashSet<AgentId>>>,
     lifecycle_rx: Arc<Mutex<mpsc::Receiver<LifecycleEvent>>>,
     lifecycle_tx: mpsc::Sender<LifecycleEvent>,
     bus: Option<Arc<InMemoryBus>>,
@@ -41,6 +85,7 @@ impl Supervisor {
         let (lifecycle_tx, lifecycle_rx) = mpsc::channel(256);
         Self {
             handles: Arc::new(RwLock::new(HashMap::new())),
+            pending: Arc::new(std::sync::Mutex::new(HashSet::new())),
             lifecycle_rx: Arc::new(Mutex::new(lifecycle_rx)),
             lifecycle_tx,
             bus: None,
@@ -95,7 +140,25 @@ impl Supervisor {
         let (handle, state_arc) = {
             let mut handles = self.handles.write().await;
 
-            if handles.len() >= self.max_agents {
+            // Registered + pending agents jointly count for duplicate and
+            // capacity checks, so a readiness-pending id cannot be shadowed
+            // by a normal spawn racing it.
+            let pending_count = self
+                .pending
+                .lock()
+                .map(|pending| {
+                    if pending.contains(&spec.id) {
+                        usize::MAX
+                    } else {
+                        pending.len()
+                    }
+                })
+                .map_err(|_| AgentError::Internal("pending lock poisoned".into()))?;
+            if pending_count == usize::MAX {
+                return Err(AgentError::AlreadyRunning(spec.id.clone()));
+            }
+
+            if handles.len() + pending_count >= self.max_agents {
                 return Err(AgentError::Internal(format!(
                     "max agents ({}) reached",
                     self.max_agents
@@ -119,6 +182,141 @@ impl Supervisor {
             handles.insert(agent_id.clone(), handle.clone());
 
             (handle, state_arc)
+        };
+
+        let state = agent.state().clone();
+        tokio::spawn(run_agent_loop_with_observers(
+            agent,
+            ltx,
+            cmd_rx,
+            Some(state_arc),
+            last_heartbeat,
+            restart_count,
+        ));
+
+        info!(agent_id = %agent_id, ?state, name = %spec.name, "agent spawned and running");
+        Ok(handle)
+    }
+
+    /// Opt-in async readiness spawn.
+    ///
+    /// The id and one `max_agents` slot are reserved before awaiting readiness,
+    /// so a pending spawn is invisible to `get`/`list`/health yet still blocks
+    /// duplicates and consumes capacity. The reservation is RAII-owned: probe
+    /// failure, timeout, `Agent::start` failure, early return, or future
+    /// cancellation releases it exactly once with no async cleanup.
+    ///
+    /// On success the local agent is started, the reservation is atomically
+    /// converted into the registered handle, and the normal agent loop is
+    /// launched. Soft [`AgentCommand::Restart`](crate::AgentCommand) never
+    /// reruns readiness; initial failure consumes zero restart budget and does
+    /// not retry.
+    ///
+    /// A rejected spawn never emits a lifecycle event: the return value is the
+    /// spawn contract, and lifecycle events only describe agents that became
+    /// running handles (#108).
+    pub async fn spawn_with_readiness<R>(
+        &self,
+        spec: AgentSpec,
+        readiness: R,
+    ) -> AgentResult<AgentHandle>
+    where
+        R: AgentReadiness,
+    {
+        let agent_id = spec.id.clone();
+        let timeout_secs = spec.readiness_timeout_secs;
+
+        // Admission: privately reserve id + capacity before awaiting readiness.
+        {
+            let handles = self.handles.write().await;
+            let mut pending = self
+                .pending
+                .lock()
+                .map_err(|_| AgentError::Internal("pending lock poisoned".into()))?;
+
+            if handles.contains_key(&spec.id) || pending.contains(&spec.id) {
+                return Err(AgentError::AlreadyRunning(spec.id.clone()));
+            }
+            if handles.len() + pending.len() >= self.max_agents {
+                return Err(AgentError::Internal(format!(
+                    "max agents ({}) reached",
+                    self.max_agents
+                )));
+            }
+            pending.insert(spec.id.clone());
+        }
+
+        let mut reservation = PendingReservation::new(Arc::clone(&self.pending), agent_id.clone());
+        let mut agent = Agent::new(spec.clone());
+
+        // Exactly one timeout owns "did not become ready in time".
+        let readiness_result = tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            readiness.wait_until_ready(&spec),
+        )
+        .await;
+
+        match readiness_result {
+            Ok(Ok(())) => {}
+            Ok(Err(reason)) => {
+                // The local agent never became a handle; record the failure
+                // locally only. No lifecycle event is emitted.
+                agent.fail(&reason);
+                return Err(AgentError::CommandFailed(reason));
+            }
+            Err(_) => {
+                warn!(
+                    agent_id = %agent_id,
+                    timeout_secs = timeout_secs,
+                    "readiness timed out"
+                );
+                agent.fail(format!("readiness timed out after {timeout_secs}s"));
+                return Err(AgentError::Timeout(agent_id));
+            }
+        }
+
+        // Readiness succeeded: synchronous start of the local agent. Any
+        // failure here drops `reservation` and frees id/capacity.
+        agent.start()?;
+
+        // Atomically convert the reservation into the registered handle. This
+        // section holds the handles write lock and only touches synchronous
+        // state, so there is no cancellation point between removing the
+        // reservation and inserting the handle.
+        let (handle, state_arc, cmd_rx, last_heartbeat, restart_count, ltx) = {
+            let mut handles = self.handles.write().await;
+            if let Ok(mut pending) = self.pending.lock() {
+                pending.remove(&agent_id);
+            }
+            if handles.contains_key(&agent_id) {
+                // Unreachable: the reservation blocked duplicates. If it ever
+                // fired, fail closed without emitting a lifecycle event.
+                reservation.defuse();
+                return Err(AgentError::AlreadyRunning(agent_id));
+            }
+
+            let (cmd_tx, cmd_rx) = mpsc::channel(32);
+            let last_heartbeat = Arc::new(AtomicU64::new(current_time_secs()));
+            let restart_count = Arc::new(AtomicU64::new(0));
+            let ltx = self.lifecycle_tx();
+            let handle = AgentHandle::new(
+                agent.clone(),
+                cmd_tx,
+                self.lifecycle_tx(),
+                Arc::clone(&last_heartbeat),
+                Arc::clone(&restart_count),
+            );
+            let state_arc = handle.state_arc();
+            handles.insert(agent_id.clone(), handle.clone());
+            reservation.defuse();
+            (
+                handle,
+                state_arc,
+                cmd_rx,
+                last_heartbeat,
+                restart_count,
+                ltx,
+            )
         };
 
         let state = agent.state().clone();
@@ -329,6 +527,7 @@ impl Clone for Supervisor {
     fn clone(&self) -> Self {
         Self {
             handles: Arc::clone(&self.handles),
+            pending: Arc::clone(&self.pending),
             lifecycle_rx: Arc::clone(&self.lifecycle_rx),
             lifecycle_tx: self.lifecycle_tx.clone(),
             bus: self.bus.clone(),

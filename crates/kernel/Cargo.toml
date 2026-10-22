@@ -35,6 +35,7 @@ futures.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
 
 [[bench]]
 name = "kernel_bench"

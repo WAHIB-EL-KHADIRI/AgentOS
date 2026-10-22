@@ -11,6 +11,7 @@ const statusColors: Record<AgentStatus, string> = {
   stopped: "#a3a3a3",
   error: "#ef4444",
   starting: "#f59e0b",
+  created: "#f59e0b",
 };
 
 export default function AgentCard({ agent, selected, onSelect }: AgentCardProps) {

@@ -173,11 +173,12 @@ pub fn agent_info_json(
 }
 
 /// Map a kernel agent state onto the dashboard's `AgentStatus` union:
-/// `running | stopped | error | starting`.
+/// `running | stopped | error | created` (`starting` remains accepted for
+/// backwards compatibility but is no longer emitted).
 pub fn agent_status_label(state: &AgentState) -> &'static str {
     match state {
         AgentState::Running => "running",
-        AgentState::Created => "starting",
+        AgentState::Created => "created",
         AgentState::Stopped => "stopped",
         AgentState::Degraded(_) | AgentState::Failed(_) => "error",
     }
@@ -342,7 +343,7 @@ mod tests {
     #[test]
     fn test_agent_status_label_covers_dashboard_union() {
         assert_eq!(agent_status_label(&AgentState::Running), "running");
-        assert_eq!(agent_status_label(&AgentState::Created), "starting");
+        assert_eq!(agent_status_label(&AgentState::Created), "created");
         assert_eq!(agent_status_label(&AgentState::Stopped), "stopped");
         assert_eq!(
             agent_status_label(&AgentState::Degraded("slow".into())),
