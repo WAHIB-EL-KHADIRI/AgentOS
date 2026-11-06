@@ -4,6 +4,7 @@ members = [
     "crates/bus",
     "crates/memory",
     "crates/trace",
+    "crates/state",
     "crates/vault",
     "crates/registry",
     "crates/cli",

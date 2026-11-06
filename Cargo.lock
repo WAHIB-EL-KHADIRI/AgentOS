@@ -100,6 +100,7 @@ version = "0.1.0"
 dependencies = [
  "agentos-bus",
  "agentos-kernel",
+ "agentos-state",
  "agentos-trace",
  "anyhow",
  "chrono",
@@ -266,6 +267,16 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "agentos-state"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

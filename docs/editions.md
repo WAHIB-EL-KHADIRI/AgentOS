@@ -33,6 +33,7 @@ anything or telling anyone.
 | Service registry and capability discovery | `agentos-registry` |
 | LLM provider abstraction (OpenAI, Anthropic, custom) | `agentos-llm` |
 | WASM plugin sandbox | `agentos-plugins` |
+| Operational state model and backends | `agentos-state` |
 | Rust SDK + Python SDK | `agentos-sdk` |
 | CLI, REPL, dev server, time-travel debugging | `agentos-cli` |
 | Local dashboard | `dashboard/` |
@@ -51,7 +52,7 @@ an auditor, and a compliance officer are involved.
 | Planned capability | Extends |
 |---|---|
 | **Hosted trace storage** — S3/Postgres backends, retention policy, cross-run search | `agentos_trace::TraceStore` trait |
-| **Multi-tenancy** — tenant isolation, shared state backends, quotas | `StateBackend` (see note below) |
+| **Multi-tenancy** — tenant isolation, shared state backends, quotas | `agentos_state::StateBackend` |
 | **RBAC + SSO** — roles, SAML/OIDC, directory sync | `agentos_vault::PermissionSet` |
 | **Audit log** — tamper-evident, exportable, retention controls | `agentos_kernel::AgentHooks`, journal |
 | **Advanced replay analytics** — fleet-wide drift, regression detection, cost attribution | `agentos_trace::diff`, `compare_replay` |
@@ -75,16 +76,17 @@ This is why the boundary is honest:
 - **The extension points are public.** Every Enterprise capability plugs into a
   trait that is already exported from the open-source core:
   `agentos_trace::TraceStore`, `agentos_vault::PermissionSet`,
-  `agentos_kernel::AgentHooks`, and `agentos_kernel::PluginRegistry`. You can
-  implement any of them yourself, in-house, and never pay a cent. Several
-  people will, and that is fine.
+  `agentos_kernel::AgentHooks`, `agentos_kernel::PluginRegistry`, and
+  `agentos_state::StateBackend`. You can implement them yourself, in-house, and
+  never pay a cent. Several people will, and that is fine.
 
-  **One exception, stated honestly:** `StateBackend` currently lives inside
-  `agentos-cli`, which is a binary-only crate with no `lib.rs`. It is therefore
-  *not* public API today, and multi-tenancy cannot be implemented against it
-  from outside. Promoting it to a library crate is a prerequisite for that row
-  of the table, and it will be done in the open core — not held back to force
-  an Enterprise purchase. Tracked as an open item.
+  `agentos_state::StateBackend` is a public extension point. Its current API
+  loads and saves complete snapshots synchronously and does not include
+  revision checks or compare-and-swap. The built-in stores and CLI therefore
+  assume a single writer; safe shared concurrent state requires a concurrency
+  contract that is not part of this API yet. Multi-tenancy is in development,
+  and the public storage seam does not claim that concurrent multi-tenant
+  writes are already safe.
 
 That last point is the test of an honest Open Core: the commercial edition has
 to win on being better, not on being the only thing that fits the socket.

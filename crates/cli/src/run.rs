@@ -15,8 +15,8 @@ use crate::state::{
     append_checkpoint, append_log, checkpoints_count_for_agent, current_time_millis, doctor_state,
     export_state, has_agent, import_state, inspect_state, list_agents, load_state,
     logs_count_for_agent, logs_for_agent, migrate_state, new_checkpoint, new_log_entry,
-    parse_duration_ms, save_state, trace_containing_checkpoint, trace_for_agent, upsert_agent,
-    StateBackendKind, StateCleanOptions, StateDoctorStatus, StateImportMode,
+    parse_duration_ms, parse_state_backend_kind, save_state, trace_containing_checkpoint,
+    trace_for_agent, upsert_agent, StateCleanOptions, StateDoctorStatus, StateImportMode,
 };
 use crate::{AgentTemplate, GraphFormat, OutputFormat};
 
@@ -1959,8 +1959,8 @@ pub async fn state_import_command(
 }
 
 pub async fn state_migrate_command(from: &str, to: &str, dry_run: bool) -> anyhow::Result<()> {
-    let from = StateBackendKind::parse(from)?;
-    let to = StateBackendKind::parse(to)?;
+    let from = parse_state_backend_kind(from)?;
+    let to = parse_state_backend_kind(to)?;
     let report = migrate_state(from, to, dry_run)?;
 
     print_section("AgentOS CLI state migrate");

@@ -2,76 +2,114 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agentos_state::{
+    JsonStateBackend, SqliteStateBackend, StateBackend, StateError, StateSnapshot,
+    StoredThoughtEntry,
+};
 use agentos_trace::RecordedThought;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-mod backend;
-mod json;
-pub mod migrations;
-mod sqlite;
-
-pub use backend::{StateBackend, StateBackendKind};
-pub use json::JsonStateBackend;
+pub use agentos_state::{
+    sqlite_schema_version_at, StateBackendKind, StoredAgentEntry, StoredLogEntry,
+};
 #[cfg(test)]
-pub use sqlite::save_state_to_sqlite_path;
-pub use sqlite::{load_state_from_sqlite_path, sqlite_schema_version_at, SqliteStateBackend};
+pub use agentos_state::{CURRENT_STATE_VERSION, LEGACY_STATE_VERSION};
 
-static STATE_BACKEND_KIND: OnceLock<Mutex<StateBackendKind>> = OnceLock::new();
-
-/// The version this build writes.
-pub const CURRENT_STATE_VERSION: u32 = 1;
-
-/// Exports written before the version field existed. Permanently 1.
-const LEGACY_STATE_VERSION: u32 = 1;
-
-const _: () = assert!(LEGACY_STATE_VERSION == 1);
-
-fn state_backend_kind_cell() -> &'static Mutex<StateBackendKind> {
-    STATE_BACKEND_KIND.get_or_init(|| Mutex::new(StateBackendKind::from_env()))
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredLogEntry {
-    pub agent_id: String,
-    pub event_type: String,
-    pub message: String,
-    pub timestamp_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredAgentEntry {
-    pub agent_id: String,
-    pub name: String,
-    pub config_path: String,
-    pub state: String,
-    #[serde(default)]
-    pub started_at_ms: u64,
-    pub updated_at_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CliState {
-    #[serde(default = "default_state_version")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct CliState {
+    #[serde(default = "legacy_state_version")]
     version: u32,
     agents: Vec<StoredAgentEntry>,
     logs: Vec<StoredLogEntry>,
     thoughts: Vec<RecordedThought>,
 }
 
-fn default_state_version() -> u32 {
-    LEGACY_STATE_VERSION
-}
-
 impl Default for CliState {
     fn default() -> Self {
         Self {
-            version: CURRENT_STATE_VERSION,
+            version: agentos_state::CURRENT_STATE_VERSION,
             agents: Vec::new(),
             logs: Vec::new(),
             thoughts: Vec::new(),
         }
     }
+}
+
+impl CliState {
+    fn validate_version(&self) -> agentos_state::StateResult<()> {
+        if self.version > agentos_state::CURRENT_STATE_VERSION {
+            return Err(StateError::UnsupportedVersion {
+                found: self.version,
+                supported: agentos_state::CURRENT_STATE_VERSION,
+            });
+        }
+        Ok(())
+    }
+}
+
+fn legacy_state_version() -> u32 {
+    agentos_state::LEGACY_STATE_VERSION
+}
+
+// Keep the trace-owned `RecordedThought` type at the CLI boundary so the
+// publishable state crate does not need an unpublished trace-crate dependency.
+fn cli_state_from_snapshot(snapshot: StateSnapshot) -> CliState {
+    CliState {
+        version: snapshot.version,
+        agents: snapshot.agents,
+        logs: snapshot.logs,
+        thoughts: snapshot
+            .thoughts
+            .into_iter()
+            .map(|thought| RecordedThought {
+                checkpoint_id: thought.checkpoint_id,
+                agent_id: thought.agent_id,
+                content: thought.content,
+                timestamp_ms: thought.timestamp_ms,
+                parent_checkpoint_id: thought.parent_checkpoint_id,
+                metadata: thought.metadata,
+            })
+            .collect(),
+    }
+}
+
+fn state_snapshot_from_cli(state: &CliState) -> StateSnapshot {
+    StateSnapshot {
+        version: state.version,
+        agents: state.agents.clone(),
+        logs: state.logs.clone(),
+        thoughts: state
+            .thoughts
+            .iter()
+            .map(|thought| StoredThoughtEntry {
+                checkpoint_id: thought.checkpoint_id.clone(),
+                agent_id: thought.agent_id.clone(),
+                content: thought.content.clone(),
+                timestamp_ms: thought.timestamp_ms,
+                parent_checkpoint_id: thought.parent_checkpoint_id.clone(),
+                metadata: thought.metadata.clone(),
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn load_state_from_sqlite_path(path: &Path) -> agentos_state::StateResult<CliState> {
+    agentos_state::load_state_from_sqlite_path(path).map(cli_state_from_snapshot)
+}
+
+#[cfg(test)]
+pub(crate) fn save_state_to_sqlite_path(
+    state: &CliState,
+    path: &Path,
+) -> agentos_state::StateResult<()> {
+    agentos_state::save_state_to_sqlite_path(&state_snapshot_from_cli(state), path)
+}
+
+static STATE_BACKEND_KIND: OnceLock<Mutex<StateBackendKind>> = OnceLock::new();
+
+fn state_backend_kind_cell() -> &'static Mutex<StateBackendKind> {
+    STATE_BACKEND_KIND.get_or_init(|| Mutex::new(state_backend_kind_from_env()))
 }
 
 #[derive(Debug, Clone)]
@@ -173,23 +211,132 @@ pub struct StateInspectReport {
 }
 
 pub fn set_state_backend(value: &str) -> anyhow::Result<()> {
-    let kind = StateBackendKind::parse(value)?;
+    let kind = parse_state_backend_kind(value)?;
     *state_backend_kind_cell().lock() = kind;
     Ok(())
 }
 
 pub fn current_state_backend_kind() -> StateBackendKind {
-    *state_backend_kind_cell().lock()
+    state_backend_kind_cell().lock().clone()
 }
 
-pub fn current_state_backend() -> Box<dyn StateBackend> {
+fn current_state_backend() -> CliStateBackend {
     backend_for_kind(current_state_backend_kind())
 }
 
-fn backend_for_kind(kind: StateBackendKind) -> Box<dyn StateBackend> {
-    match kind {
-        StateBackendKind::Json => Box::new(JsonStateBackend::new(default_state_path())),
-        StateBackendKind::Sqlite => Box::new(SqliteStateBackend::new(default_sqlite_state_path())),
+fn state_backend_kind_from_env() -> StateBackendKind {
+    std::env::var("AGENTOS_STATE_BACKEND")
+        .ok()
+        .and_then(|value| parse_state_backend_kind(&value).ok())
+        .unwrap_or(StateBackendKind::SQLITE)
+}
+
+pub(crate) fn parse_state_backend_kind(value: &str) -> anyhow::Result<StateBackendKind> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "json" => Ok(StateBackendKind::JSON),
+        "sqlite" => Ok(StateBackendKind::SQLITE),
+        other => anyhow::bail!("unsupported state backend '{other}'. Use: json, sqlite"),
+    }
+}
+
+fn backend_for_kind(kind: StateBackendKind) -> CliStateBackend {
+    let path = match kind.as_str() {
+        "json" => default_state_path(),
+        "sqlite" => default_sqlite_state_path(),
+        _ => unreachable!("CLI state backend selection only accepts built-in names"),
+    };
+    cli_backend_at(kind, path)
+}
+
+fn cli_backend_at(kind: StateBackendKind, path: impl AsRef<Path>) -> CliStateBackend {
+    let path = path.as_ref().to_path_buf();
+    let storage: Box<dyn StateBackend> = match kind.as_str() {
+        "json" => Box::new(JsonStateBackend::new(&path)),
+        "sqlite" => Box::new(SqliteStateBackend::new(&path)),
+        _ => unreachable!("CLI state backend selection only accepts built-in names"),
+    };
+
+    CliStateBackend {
+        kind,
+        path,
+        storage,
+    }
+}
+
+struct CliStateBackend {
+    kind: StateBackendKind,
+    path: PathBuf,
+    storage: Box<dyn StateBackend>,
+}
+
+impl CliStateBackend {
+    fn kind(&self) -> StateBackendKind {
+        self.kind.clone()
+    }
+
+    fn path(&self) -> PathBuf {
+        self.path.clone()
+    }
+
+    fn load_state(&self) -> anyhow::Result<CliState> {
+        match self.storage.load_state() {
+            Ok(state) => Ok(cli_state_from_snapshot(state)),
+            Err(StateError::InvalidData { .. }) if self.kind == StateBackendKind::JSON => {
+                backup_corrupt_state(&self.path)?;
+                Ok(CliState::default())
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn save_state(&self, state: &CliState) -> anyhow::Result<()> {
+        self.storage
+            .save_state(&state_snapshot_from_cli(state))
+            .map_err(Into::into)
+    }
+
+    fn doctor(&self) -> anyhow::Result<StateDoctorReport> {
+        match self.kind.as_str() {
+            "json" => doctor_state_at(&self.path),
+            "sqlite" => doctor_sqlite_state_at(&self.path),
+            _ => unreachable!("CLI state backend selection only accepts built-in names"),
+        }
+    }
+
+    fn inspect(&self) -> StateInspectReport {
+        if self.kind == StateBackendKind::JSON {
+            inspect_state_at(&self.path)
+        } else {
+            inspect_loaded_state(self)
+        }
+    }
+
+    fn export_state(&self, output: &Path, pretty: bool) -> anyhow::Result<StateExportReport> {
+        export_backend_state(self, output, pretty)
+    }
+
+    fn import_state(
+        &self,
+        input: &Path,
+        mode: StateImportMode,
+        dry_run: bool,
+    ) -> anyhow::Result<StateImportReport> {
+        import_into_backend(self, input, mode, dry_run)
+    }
+
+    fn clean(&self, options: &StateCleanOptions) -> anyhow::Result<StateCleanReport> {
+        clean_backend_state(self, options)
+    }
+
+    fn migrate_from_json(
+        &self,
+        source: &Path,
+        dry_run: bool,
+    ) -> anyhow::Result<StateMigrationReport> {
+        if self.kind != StateBackendKind::SQLITE {
+            anyhow::bail!("only json -> sqlite migration is supported in this phase");
+        }
+        migrate_json_to_sqlite_paths(source, &self.path, dry_run)
     }
 }
 
@@ -197,6 +344,7 @@ pub fn load_state() -> anyhow::Result<CliState> {
     current_state_backend().load_state()
 }
 
+#[cfg(test)]
 pub fn load_state_from_path(path: &Path) -> anyhow::Result<CliState> {
     match read_state(path)? {
         StateReadResult::Loaded(state) => Ok(state),
@@ -213,16 +361,9 @@ pub fn save_state(state: &CliState) -> anyhow::Result<()> {
 }
 
 pub fn save_state_to_path(state: &CliState, path: &Path) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            anyhow::anyhow!("cannot create CLI state dir '{}': {e}", parent.display())
-        })?;
-    }
-
-    let json = serde_json::to_string_pretty(state)
-        .map_err(|e| anyhow::anyhow!("cannot encode CLI state: {e}"))?;
-    std::fs::write(path, json)
-        .map_err(|e| anyhow::anyhow!("cannot write CLI state '{}': {e}", path.display()))
+    JsonStateBackend::new(path)
+        .save_state(&state_snapshot_from_cli(state))
+        .map_err(Into::into)
 }
 
 pub fn upsert_agent(
@@ -383,7 +524,7 @@ pub fn inspect_state(input: Option<&Path>) -> StateInspectReport {
     }
 }
 
-pub(crate) fn inspect_loaded_state(backend: &dyn StateBackend) -> StateInspectReport {
+fn inspect_loaded_state(backend: &CliStateBackend) -> StateInspectReport {
     let path = backend.path();
     let file_size_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     match backend.load_state() {
@@ -489,8 +630,8 @@ pub fn clean_state(options: &StateCleanOptions) -> anyhow::Result<StateCleanRepo
     current_state_backend().clean(options)
 }
 
-pub(crate) fn clean_backend_state(
-    backend: &dyn StateBackend,
+fn clean_backend_state(
+    backend: &CliStateBackend,
     options: &StateCleanOptions,
 ) -> anyhow::Result<StateCleanReport> {
     let mut state = backend.load_state()?;
@@ -567,8 +708,8 @@ pub fn export_state(output: &Path, pretty: bool) -> anyhow::Result<StateExportRe
     current_state_backend().export_state(output, pretty)
 }
 
-pub(crate) fn export_backend_state(
-    backend: &dyn StateBackend,
+fn export_backend_state(
+    backend: &CliStateBackend,
     output: &Path,
     pretty: bool,
 ) -> anyhow::Result<StateExportReport> {
@@ -581,7 +722,7 @@ pub fn migrate_state(
     to: StateBackendKind,
     dry_run: bool,
 ) -> anyhow::Result<StateMigrationReport> {
-    if from != StateBackendKind::Json || to != StateBackendKind::Sqlite {
+    if from != StateBackendKind::JSON || to != StateBackendKind::SQLITE {
         anyhow::bail!("only json -> sqlite migration is supported in this phase");
     }
 
@@ -593,16 +734,16 @@ pub fn migrate_json_to_sqlite_paths(
     target: &Path,
     dry_run: bool,
 ) -> anyhow::Result<StateMigrationReport> {
-    let state = JsonStateBackend::new(source).load_state()?;
+    let state = cli_backend_at(StateBackendKind::JSON, source).load_state()?;
     let (agents, logs, checkpoints) = state_counts(&state);
 
     if !dry_run {
-        SqliteStateBackend::new(target).save_state(&state)?;
+        SqliteStateBackend::new(target).save_state(&state_snapshot_from_cli(&state))?;
     }
 
     Ok(StateMigrationReport {
-        from: StateBackendKind::Json.as_str().to_string(),
-        to: StateBackendKind::Sqlite.as_str().to_string(),
+        from: StateBackendKind::JSON.as_str().to_string(),
+        to: StateBackendKind::SQLITE.as_str().to_string(),
         source: source.to_path_buf(),
         target: target.to_path_buf(),
         dry_run,
@@ -649,8 +790,8 @@ pub fn import_state(
     current_state_backend().import_state(input, mode, dry_run)
 }
 
-pub(crate) fn import_into_backend(
-    backend: &dyn StateBackend,
+fn import_into_backend(
+    backend: &CliStateBackend,
     input: &Path,
     mode: StateImportMode,
     dry_run: bool,
@@ -737,13 +878,9 @@ fn read_import_file(input: &Path) -> anyhow::Result<CliState> {
         .map_err(|e| anyhow::anyhow!("cannot read import file '{}': {e}", input.display()))?;
     let state: CliState = serde_json::from_str(&content)
         .map_err(|e| anyhow::anyhow!("invalid state import file '{}': {e}", input.display()))?;
-    if state.version > CURRENT_STATE_VERSION {
-        anyhow::bail!(
-            "state export version {} is newer than supported version {}",
-            state.version,
-            CURRENT_STATE_VERSION
-        );
-    }
+    state.validate_version().map_err(|error| {
+        anyhow::anyhow!("invalid state import file '{}': {error}", input.display())
+    })?;
     Ok(state)
 }
 
@@ -835,7 +972,7 @@ pub fn doctor_state_at(path: &Path) -> anyhow::Result<StateDoctorReport> {
         StateReadResult::Loaded(state) => {
             let (agents, logs, checkpoints) = state_counts(&state);
             Ok(StateDoctorReport {
-                backend: StateBackendKind::Json.as_str().to_string(),
+                backend: StateBackendKind::JSON.as_str().to_string(),
                 path: path.to_path_buf(),
                 status: StateDoctorStatus::Healthy,
                 schema_version: None,
@@ -845,7 +982,7 @@ pub fn doctor_state_at(path: &Path) -> anyhow::Result<StateDoctorReport> {
             })
         }
         StateReadResult::Missing => Ok(StateDoctorReport {
-            backend: StateBackendKind::Json.as_str().to_string(),
+            backend: StateBackendKind::JSON.as_str().to_string(),
             path: path.to_path_buf(),
             status: StateDoctorStatus::Missing,
             schema_version: None,
@@ -856,7 +993,7 @@ pub fn doctor_state_at(path: &Path) -> anyhow::Result<StateDoctorReport> {
         StateReadResult::Corrupt => {
             let backup = backup_corrupt_state(path)?;
             Ok(StateDoctorReport {
-                backend: StateBackendKind::Json.as_str().to_string(),
+                backend: StateBackendKind::JSON.as_str().to_string(),
                 path: path.to_path_buf(),
                 status: StateDoctorStatus::CorruptBackedUp(backup),
                 schema_version: None,
@@ -874,7 +1011,7 @@ pub fn doctor_sqlite_state_at(path: &Path) -> anyhow::Result<StateDoctorReport> 
             Ok(state) => {
                 let (agents, logs, checkpoints) = state_counts(&state);
                 Ok(StateDoctorReport {
-                    backend: StateBackendKind::Sqlite.as_str().to_string(),
+                    backend: StateBackendKind::SQLITE.as_str().to_string(),
                     path: path.to_path_buf(),
                     status: StateDoctorStatus::Healthy,
                     schema_version: Some(version),
@@ -884,7 +1021,7 @@ pub fn doctor_sqlite_state_at(path: &Path) -> anyhow::Result<StateDoctorReport> 
                 })
             }
             Err(e) => Ok(StateDoctorReport {
-                backend: StateBackendKind::Sqlite.as_str().to_string(),
+                backend: StateBackendKind::SQLITE.as_str().to_string(),
                 path: path.to_path_buf(),
                 status: StateDoctorStatus::Error(e.to_string()),
                 schema_version: Some(version),
@@ -894,7 +1031,7 @@ pub fn doctor_sqlite_state_at(path: &Path) -> anyhow::Result<StateDoctorReport> 
             }),
         },
         Err(e) => Ok(StateDoctorReport {
-            backend: StateBackendKind::Sqlite.as_str().to_string(),
+            backend: StateBackendKind::SQLITE.as_str().to_string(),
             path: path.to_path_buf(),
             status: StateDoctorStatus::Error(e.to_string()),
             schema_version: None,
@@ -983,7 +1120,7 @@ fn backup_current_state(path: &Path) -> anyhow::Result<PathBuf> {
     Ok(backup_path)
 }
 
-fn backup_current_backend_state(backend: &dyn StateBackend) -> anyhow::Result<PathBuf> {
+fn backup_current_backend_state(backend: &CliStateBackend) -> anyhow::Result<PathBuf> {
     let path = backend.path();
     let looks_like_sqlite = path
         .extension()
@@ -991,7 +1128,7 @@ fn backup_current_backend_state(backend: &dyn StateBackend) -> anyhow::Result<Pa
         .map(|ext| ext.eq_ignore_ascii_case("sqlite") || ext.eq_ignore_ascii_case("db"))
         .unwrap_or(false);
 
-    if backend.kind() == StateBackendKind::Sqlite || looks_like_sqlite {
+    if backend.kind() == StateBackendKind::SQLITE || looks_like_sqlite {
         let db_path = path;
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
@@ -1122,6 +1259,32 @@ mod tests {
 
         assert_eq!(state_counts(&loaded), (0, 0, 0));
         assert_eq!(backups, 1);
+    }
+
+    #[test]
+    fn selected_json_backend_keeps_corrupt_file_recovery() {
+        let dir = temp_state_dir("selected_json_corrupt");
+        let path = dir.join("cli-state.json");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "{not-json").unwrap();
+        let backend = cli_backend_at(StateBackendKind::JSON, &path);
+
+        let loaded = backend.load_state().unwrap();
+        let backups = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("cli-state.corrupt.")
+            })
+            .count();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(state_counts(&loaded), (0, 0, 0));
+        assert_eq!(backups, 1);
+        assert!(!path.exists());
     }
 
     #[test]
@@ -1317,7 +1480,7 @@ mod tests {
         std::fs::write(&input, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
 
         let imported = read_import_file(&input).unwrap();
-        let backend = SqliteStateBackend::new(&sqlite);
+        let backend = cli_backend_at(StateBackendKind::SQLITE, &sqlite);
         let report = backend
             .import_state(&input, StateImportMode::Merge, false)
             .unwrap();
@@ -1345,7 +1508,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(&input, serde_json::to_vec_pretty(&future).unwrap()).unwrap();
 
-        let backend = SqliteStateBackend::new(&sqlite);
+        let backend = cli_backend_at(StateBackendKind::SQLITE, &sqlite);
         let result = backend.import_state(&input, StateImportMode::Replace, false);
         let error = result.unwrap_err().to_string();
         let target_exists = sqlite.exists();
@@ -1432,7 +1595,7 @@ mod tests {
     fn sqlite_backend_initializes_schema() {
         let dir = temp_state_dir("sqlite_init");
         let path = dir.join("agentos.sqlite");
-        let backend = SqliteStateBackend::new(&path);
+        let backend = cli_backend_at(StateBackendKind::SQLITE, &path);
 
         backend.save_state(&CliState::default()).unwrap();
         let loaded = backend.load_state().unwrap();
@@ -1443,13 +1606,13 @@ mod tests {
 
     #[test]
     fn sqlite_is_default_state_backend() {
-        assert_eq!(StateBackendKind::from_env(), StateBackendKind::Sqlite);
+        assert_eq!(state_backend_kind_from_env(), StateBackendKind::SQLITE);
     }
     #[test]
     fn sqlite_backend_insert_and_list_agents() {
         let dir = temp_state_dir("sqlite_agents");
         let path = dir.join("agentos.sqlite");
-        let backend = SqliteStateBackend::new(&path);
+        let backend = cli_backend_at(StateBackendKind::SQLITE, &path);
         let state = state_with_agent("agent_sqlite", "running", 10);
 
         backend.save_state(&state).unwrap();
@@ -1465,7 +1628,7 @@ mod tests {
     fn sqlite_backend_persists_logs_and_checkpoints() {
         let dir = temp_state_dir("sqlite_logs_checkpoints");
         let path = dir.join("agentos.sqlite");
-        let backend = SqliteStateBackend::new(&path);
+        let backend = cli_backend_at(StateBackendKind::SQLITE, &path);
         let state = state_with_agent("agent_sqlite", "completed", 10);
 
         backend.save_state(&state).unwrap();
@@ -1592,7 +1755,7 @@ mod tests {
         let state = deterministic_state();
 
         export_state_to_path(&state, &input, true).unwrap();
-        let backend = SqliteStateBackend::new(&sqlite);
+        let backend = cli_backend_at(StateBackendKind::SQLITE, &sqlite);
         let report = backend
             .import_state(&input, StateImportMode::Merge, false)
             .unwrap();
@@ -1621,7 +1784,7 @@ mod tests {
         save_state_to_sqlite_path(&current, &sqlite).unwrap();
         save_state_to_path(&incoming, &input).unwrap();
 
-        let current_db = SqliteStateBackend::new(&sqlite);
+        let current_db = cli_backend_at(StateBackendKind::SQLITE, &sqlite);
         let imported = read_import_file(&input).unwrap();
         let (next_state, imported_agents, _, _, _) =
             merge_imported_state(current_db.load_state().unwrap(), imported);
@@ -1644,7 +1807,7 @@ mod tests {
         save_state_to_path(&incoming, &input).unwrap();
 
         let imported = read_import_file(&input).unwrap();
-        let backend = SqliteStateBackend::new(&sqlite);
+        let backend = cli_backend_at(StateBackendKind::SQLITE, &sqlite);
         let (next_state, imported_agents, _, _, skipped_agents) =
             merge_imported_state(backend.load_state().unwrap(), imported);
         backend.save_state(&next_state).unwrap();
@@ -1664,7 +1827,7 @@ mod tests {
         let current = state_with_agent("agent_existing", "running", 1);
         let replacement = state_with_agent("agent_replacement", "completed", 2);
         save_state_to_sqlite_path(&current, &sqlite).unwrap();
-        let backend = SqliteStateBackend::new(&sqlite);
+        let backend = cli_backend_at(StateBackendKind::SQLITE, &sqlite);
 
         let backup = backup_current_backend_state(&backend).unwrap();
         backend.save_state(&replacement).unwrap();
