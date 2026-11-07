@@ -14,6 +14,7 @@ path = "src/main.rs"
 agentos-kernel = { path = "../kernel", version = "0.1.0" }
 agentos-bus = { path = "../bus", version = "0.1.0" }
 agentos-trace = { path = "../trace", version = "0.1.0" }
+agentos-state = { path = "../state", version = "0.1.0" }
 tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
