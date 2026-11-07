@@ -69,6 +69,7 @@ impl AgentConfig {
             capabilities: self.capabilities,
             max_restarts: 5,
             heartbeat_timeout_secs: 30,
+            readiness_timeout_secs: 30,
         }
     }
 }
