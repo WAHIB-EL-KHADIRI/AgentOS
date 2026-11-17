@@ -10,7 +10,6 @@ AgentOS. It does not vendor ECC and does not add runtime functionality.
 ## Before You Start
 
 - Read `AGENTS.md`.
-- For Claude-specific sessions, also read `.claude/CLAUDE.md`.
 - Work on one phase at a time.
 - Identify whether the change touches runtime, supervisor, CLI, dashboard, docs,
   tests, CI, SDKs, or demo assets.
