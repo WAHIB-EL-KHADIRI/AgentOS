@@ -361,6 +361,7 @@ aligned with the roadmap.
 - Project overview: [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md)
 - Demo: [`docs/demo.md`](docs/demo.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
+- Agent lifecycle: [`docs/lifecycle.md`](docs/lifecycle.md)
 - Runtime walkthrough: [`docs/runtime-walkthrough.md`](docs/runtime-walkthrough.md)
 - Security model: [`docs/security-model.md`](docs/security-model.md)
 - Trace replay debugging: [`docs/time-travel-debugging.md`](docs/time-travel-debugging.md)
