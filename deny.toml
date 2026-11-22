@@ -4,7 +4,11 @@
 [advisories]
 version = 2
 # version 2 defaults: vulnerability/unsound/yanked are errors.
-ignore = []
+ignore = [
+    # chrono is unmaintained (no known vulnerability in 0.4.45). Used across
+    # 8 workspace crates; migration tracked in #370. Remove this entry then.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, migration tracked in #370" },
+]
 
 [bans]
 multiple-versions = "warn"
