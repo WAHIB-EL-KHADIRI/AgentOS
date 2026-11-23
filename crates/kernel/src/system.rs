@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::sync::Arc;
 
@@ -11,7 +11,7 @@ use agentos_llm::{
 use agentos_memory::{Embedder, HashingEmbedder, InMemoryStore, MemoryRecord, MemoryStore};
 use agentos_registry::{Registry, ServiceDescriptor};
 use agentos_trace::TraceRecorder;
-use agentos_vault::{PermissionSet, Vault, VaultEncryption};
+use agentos_vault::{Permission, PermissionSet, Vault, VaultEncryption};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::agent::{AgentReadiness, AgentSpec};
@@ -92,6 +92,7 @@ pub struct AgentOSSystem {
     /// persists from interleaving and leaving a stale snapshot on disk.
     vault_persist: Arc<Mutex<()>>,
     permission_set: Arc<RwLock<PermissionSet>>,
+    agent_permissions: Arc<RwLock<HashMap<String, PermissionSet>>>,
     agent_logs: Arc<RwLock<AgentLogStore>>,
 }
 
@@ -112,6 +113,7 @@ impl fmt::Debug for AgentOSSystem {
                 &self.vault_encryption.as_ref().map(|_| "configured"),
             )
             .field("permission_set", &self.permission_set)
+            .field("agent_permissions", &self.agent_permissions)
             .field("agent_logs", &self.agent_logs)
             .finish()
     }
@@ -152,6 +154,7 @@ impl AgentOSSystem {
             vault_encryption: vault_encryption_from_env(),
             vault_persist: Arc::new(Mutex::new(())),
             permission_set: Arc::new(RwLock::new(PermissionSet::new())),
+            agent_permissions: Arc::new(RwLock::new(HashMap::new())),
             agent_logs: Arc::new(RwLock::new(AgentLogStore::new())),
         }
     }
@@ -334,7 +337,17 @@ impl AgentOSSystem {
             .record_thought(agent_id, &format!("prompt: {user_input}"))
             .await;
 
-        let tools = self.tool_registry.tools_for(agent_id).await;
+        let registered_tools = self.tool_registry.tools_for(agent_id).await;
+        let agent_permissions = self.agent_permissions.read().await;
+        let tools: Vec<_> = registered_tools
+            .into_iter()
+            .filter(|tool| {
+                agent_permissions.get(agent_id).is_some_and(|permissions| {
+                    permissions.contains(&Permission::ExecuteTool(tool.name().to_string()))
+                })
+            })
+            .collect();
+        drop(agent_permissions);
         let tool_definitions: Vec<ToolDefinition> = tools
             .iter()
             .map(|tool| {
@@ -574,6 +587,19 @@ impl AgentOSSystem {
             self.tool_registry.register(new_agent_id, tool).await;
         }
 
+        let source_permissions = self
+            .agent_permissions
+            .read()
+            .await
+            .get(&session.agent_id)
+            .cloned();
+        if let Some(permissions) = source_permissions {
+            self.agent_permissions
+                .write()
+                .await
+                .insert(new_agent_id.to_string(), permissions);
+        }
+
         let responses: Vec<RecordedResponse> = session.exchanges[..prefix_len]
             .iter()
             .map(|exchange| exchange.response.clone())
@@ -614,12 +640,22 @@ impl AgentOSSystem {
             )
             .await;
 
-        let outcome = match self.tool_registry.get(agent_id, &call.name).await {
-            Some(tool) => tool.invoke(&call.arguments).await,
-            None => Err(format!(
-                "tool '{}' is not registered for this agent",
+        let outcome = if self
+            .check_agent_permission(agent_id, &Permission::ExecuteTool(call.name.clone()))
+            .await
+        {
+            match self.tool_registry.get(agent_id, &call.name).await {
+                Some(tool) => tool.invoke(&call.arguments).await,
+                None => Err(format!(
+                    "tool '{}' is not registered for this agent",
+                    call.name
+                )),
+            }
+        } else {
+            Err(format!(
+                "permission denied: agent '{agent_id}' cannot execute tool '{}'",
                 call.name
-            )),
+            ))
         };
         let (success, output) = match outcome {
             Ok(output) => (true, output),
@@ -835,6 +871,38 @@ impl AgentOSSystem {
         perms.grant(permission);
     }
 
+    /// Grant a permission to one agent. Tool execution uses these per-agent
+    /// grants and is denied by default, even when a tool is registered.
+    pub async fn grant_agent_permission(&self, agent_id: &str, permission: Permission) {
+        let mut permissions = self.agent_permissions.write().await;
+        permissions
+            .entry(agent_id.to_string())
+            .or_default()
+            .grant(permission);
+    }
+
+    /// Revoke one of an agent's permissions. This does not affect other agents.
+    pub async fn revoke_agent_permission(&self, agent_id: &str, permission: &Permission) {
+        let mut permissions = self.agent_permissions.write().await;
+        if let Some(agent_permissions) = permissions.get_mut(agent_id) {
+            agent_permissions.revoke(permission);
+            if agent_permissions.is_empty() {
+                permissions.remove(agent_id);
+            }
+        }
+    }
+
+    /// Check whether this agent has a permission. Missing agent grants deny.
+    pub async fn check_agent_permission(&self, agent_id: &str, permission: &Permission) -> bool {
+        self.agent_permissions
+            .read()
+            .await
+            .get(agent_id)
+            .is_some_and(|permissions| permissions.contains(permission))
+    }
+
+    /// System-wide grants do not authorize tool execution; use
+    /// [Self::grant_agent_permission] for an agent-specific tool grant.
     pub async fn check_permission(&self, permission: &agentos_vault::Permission) -> bool {
         let perms = self.permission_set.read().await;
         perms.contains(permission)
@@ -1069,6 +1137,26 @@ mod tests {
         }
     }
 
+    struct CountingTool {
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeTool for CountingTool {
+        fn name(&self) -> &str {
+            "count"
+        }
+
+        fn description(&self) -> &str {
+            "Counts invocations"
+        }
+
+        async fn invoke(&self, _arguments: &serde_json::Value) -> Result<String, String> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok("called".into())
+        }
+    }
+
     fn tool_call_response(
         name: &str,
         args: serde_json::Value,
@@ -1126,6 +1214,9 @@ mod tests {
             .spawn_agent(AgentSpec::new("tool-test", "Tool Test"))
             .await
             .unwrap();
+        system
+            .grant_agent_permission("tool-test", Permission::ExecuteTool("uppercase".into()))
+            .await;
 
         let step = system
             .run_agent_once("tool-test", "please uppercase")
@@ -1169,6 +1260,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tool_execution_requires_agent_specific_permission() {
+        let (system, dir) = system_with_temp_data("tool_permissions");
+        let allowed_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let denied_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        system
+            .register_tool(
+                "allowed-agent",
+                Arc::new(CountingTool {
+                    calls: Arc::clone(&allowed_calls),
+                }),
+            )
+            .await;
+        system
+            .register_tool(
+                "denied-agent",
+                Arc::new(CountingTool {
+                    calls: Arc::clone(&denied_calls),
+                }),
+            )
+            .await;
+        system
+            .spawn_agent(AgentSpec::new("allowed-agent", "Allowed"))
+            .await
+            .unwrap();
+        system
+            .spawn_agent(AgentSpec::new("denied-agent", "Denied"))
+            .await
+            .unwrap();
+
+        let tool_permission = Permission::ExecuteTool("count".into());
+        system
+            .grant_agent_permission("allowed-agent", tool_permission.clone())
+            .await;
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
+                tool_call_response("count", serde_json::json!({})),
+                final_response("allowed"),
+            ])))
+            .await;
+
+        let allowed_step = system
+            .run_agent_once("allowed-agent", "run the tool")
+            .await
+            .unwrap();
+        assert!(allowed_step.tool_invocations[0].success);
+        assert_eq!(allowed_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // A system-wide grant must not bypass the per-agent execution gate.
+        system.grant_permission(tool_permission.clone()).await;
+        system
+            .set_llm_provider(Arc::new(ScriptedProvider::new(vec![
+                tool_call_response("count", serde_json::json!({})),
+                final_response("denied"),
+            ])))
+            .await;
+
+        let denied_step = system
+            .run_agent_once("denied-agent", "run the tool")
+            .await
+            .unwrap();
+        assert!(!denied_step.tool_invocations[0].success);
+        assert!(denied_step.tool_invocations[0]
+            .output
+            .contains("permission denied"));
+        assert_eq!(denied_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(
+            system
+                .check_agent_permission("allowed-agent", &tool_permission)
+                .await
+        );
+        assert!(
+            !system
+                .check_agent_permission("denied-agent", &tool_permission)
+                .await
+        );
+
+        system
+            .revoke_agent_permission("allowed-agent", &tool_permission)
+            .await;
+        assert!(
+            !system
+                .check_agent_permission("allowed-agent", &tool_permission)
+                .await
+        );
+
+        system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn test_run_agent_once_unknown_tool_records_error() {
         let (system, dir) = system_with_temp_data("unknown");
         system
@@ -1181,6 +1363,12 @@ mod tests {
             .spawn_agent(AgentSpec::new("missing-tool-test", "Missing Tool Test"))
             .await
             .unwrap();
+        system
+            .grant_agent_permission(
+                "missing-tool-test",
+                Permission::ExecuteTool("missing_tool".into()),
+            )
+            .await;
 
         let step = system
             .run_agent_once("missing-tool-test", "go")
@@ -1216,6 +1404,9 @@ mod tests {
             .spawn_agent(AgentSpec::new("loop-test", "Loop Test"))
             .await
             .unwrap();
+        system
+            .grant_agent_permission("loop-test", Permission::ExecuteTool("uppercase".into()))
+            .await;
 
         let step = system.run_agent_once("loop-test", "go").await.unwrap();
 
@@ -1244,6 +1435,9 @@ mod tests {
             .spawn_agent(AgentSpec::new("rp-src", "Replay Source"))
             .await
             .unwrap();
+        system
+            .grant_agent_permission("rp-src", Permission::ExecuteTool("uppercase".into()))
+            .await;
 
         let original = system
             .run_agent_once("rp-src", "please uppercase")
@@ -1306,6 +1500,9 @@ mod tests {
             .spawn_agent(AgentSpec::new("drift-src", "Drift Source"))
             .await
             .unwrap();
+        system
+            .grant_agent_permission("drift-src", Permission::ExecuteTool("uppercase".into()))
+            .await;
         system.run_agent_once("drift-src", "go").await.unwrap();
 
         // The tool implementation changed between recording and replay.
@@ -1345,6 +1542,9 @@ mod tests {
             .spawn_agent(AgentSpec::new("fork-src", "Fork Source"))
             .await
             .unwrap();
+        system
+            .grant_agent_permission("fork-src", Permission::ExecuteTool("uppercase".into()))
+            .await;
         let original = system.run_agent_once("fork-src", "go").await.unwrap();
         assert_eq!(original.content, "original ending");
 
@@ -1393,6 +1593,9 @@ mod tests {
             .spawn_agent(AgentSpec::new("nolive-src", "No Live Source"))
             .await
             .unwrap();
+        system
+            .grant_agent_permission("nolive-src", Permission::ExecuteTool("uppercase".into()))
+            .await;
         system.run_agent_once("nolive-src", "go").await.unwrap();
 
         let session = Persistence::new(&dir)
