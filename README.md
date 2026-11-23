@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.94%2B-orange" alt="Rust 1.94+"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.97%2B-orange" alt="Rust 1.97+"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <a href="https://github.com/WAHIB-EL-KHADIRI/AgentOS/actions/workflows/ci.yml"><img src="https://github.com/WAHIB-EL-KHADIRI/AgentOS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/WAHIB-EL-KHADIRI/AgentOS"><img src="https://api.scorecard.dev/projects/github.com/WAHIB-EL-KHADIRI/AgentOS/badge" alt="OpenSSF Scorecard"></a>
@@ -370,7 +370,7 @@ aligned with the roadmap.
 - Editions (Open Core boundary): [`docs/editions.md`](docs/editions.md)
 - Licensing: [`LICENSING.md`](LICENSING.md)
 
-## Ownership
+## Governance
 
 Contributions are welcome and credited. Technical direction is currently set by
 the maintainer; see [`MAINTAINERS.md`](MAINTAINERS.md) for how decisions are made
