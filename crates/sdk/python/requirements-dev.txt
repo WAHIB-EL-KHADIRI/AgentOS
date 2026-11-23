@@ -80,9 +80,9 @@ pytest==9.2.0 \
     # via
     #   agentos-sdk (pyproject.toml)
     #   pytest-asyncio
-pytest-asyncio==1.4.1.post1 \
-    --hash=sha256:0755e488cc0a2b9bd2eab7292cc6390d4cbb8390f1020745647bae5a708e0165 \
-    --hash=sha256:f582d9ea4a1c082195abe8bd29a1fe106aeb1cd435e3dad2d3bc2749935c36a2
+pytest-asyncio==1.5.0 \
+    --hash=sha256:557f255ee03cc84f84a8d5f438bc9c6e0f714bf86970ae743c7ecb5a38d7e07d \
+    --hash=sha256:92c8fa83ca419fd0d4bd6a34df6520dae435841d3733c319343249492adf37f7
     # via agentos-sdk (pyproject.toml)
 ruff==0.17.4 \
     --hash=sha256:0d1f4848fd2ec0499be4046db9b7dfcc952666885f00233cc7033515282556a8 \
