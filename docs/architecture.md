@@ -46,6 +46,9 @@ Important runtime questions:
 starts and stops agents, tracks agent state, emits lifecycle events, and connects
 the supervisor to system-level services.
 
+See [Agent lifecycle](lifecycle.md) for the current state transitions, opt-in
+readiness contract, restart behavior, and failure paths.
+
 Future work in this area should remain narrow and test-driven. Restart and
 recovery behavior should not be described as production-ready until there are
 clear tests and documented guarantees.
