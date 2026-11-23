@@ -8,6 +8,18 @@ updates:
     labels:
       - dependencies
       - rust
+    # main requires branches to be up to date, so every merged bump puts the
+    # rest behind and each needs its own rebase + CI round. One weekly PR for
+    # routine bumps avoids that queue. Groups only cover version updates:
+    # security updates still arrive as their own PRs, and majors stay
+    # individual so each one is a deliberate decision.
+    groups:
+      rust-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: npm
     directory: /crates/sdk/typescript
@@ -56,6 +68,14 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      # Catch-all for the rest (jsdom, prettier, ...). Listed last: a
+      # dependency joins the first group whose patterns match it.
+      dashboard-other:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: pip
     directory: /crates/sdk/python
@@ -65,6 +85,13 @@ updates:
     labels:
       - dependencies
       - python
+    groups:
+      python-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Actions are pinned to commit SHAs, which never move on their own.
   # This is what keeps a pin from sitting on a known-vulnerable version.
