@@ -4,6 +4,7 @@ use agentos_kernel::{
     agent::{AgentId, AgentSpec, AgentState},
     AgentOSSystem, AgentReadiness, Supervisor,
 };
+use agentos_vault::Permission;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -173,11 +174,7 @@ impl AgentBuilder {
         let (spec, tools) = self.into_parts(id);
         let tool_count = tools.len();
         let handle = system.spawn_agent(spec).await?;
-        for tool in tools {
-            system
-                .register_tool(&handle.id, Arc::new(crate::tool::SdkToolAdapter::new(tool)))
-                .await;
-        }
+        register_sdk_tools(system, &handle.id, tools).await;
         tracing::info!(
             agent_id = %handle.id,
             tools = tool_count,
@@ -226,11 +223,7 @@ impl AgentBuilder {
         let (spec, tools) = self.into_parts(id);
         let tool_count = tools.len();
         let handle = system.spawn_agent_with_readiness(spec, readiness).await?;
-        for tool in tools {
-            system
-                .register_tool(&handle.id, Arc::new(crate::tool::SdkToolAdapter::new(tool)))
-                .await;
-        }
+        register_sdk_tools(system, &handle.id, tools).await;
         tracing::info!(
             agent_id = %handle.id,
             tools = tool_count,
@@ -277,9 +270,25 @@ impl AgentBuilder {
     }
 }
 
+async fn register_sdk_tools(system: &AgentOSSystem, agent_id: &str, tools: Vec<Arc<dyn Tool>>) {
+    for tool in tools {
+        // Registering a tool on AgentBuilder is an explicit per-agent opt-in.
+        // Keep raw kernel registrations denied unless they receive their own grant.
+        system
+            .grant_agent_permission(agent_id, Permission::ExecuteTool(tool.name().to_string()))
+            .await;
+        system
+            .register_tool(agent_id, Arc::new(crate::tool::SdkToolAdapter::new(tool)))
+            .await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentos_kernel::RuntimeConfig;
+    use agentos_llm::{RecordedResponse, ReplayProvider, ToolCall};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_builder_defaults() {
@@ -385,6 +394,72 @@ mod tests {
         assert_eq!(output, "echo:{\"text\":\"hi\"}");
 
         system.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn test_sdk_builder_tools_execute_through_llm_dispatch() {
+        use crate::tool::ToolResult;
+
+        struct EchoTool;
+
+        #[async_trait::async_trait]
+        impl Tool for EchoTool {
+            fn name(&self) -> &str {
+                "sdk_echo"
+            }
+
+            fn description(&self) -> &str {
+                "echoes input"
+            }
+
+            async fn run(&self, input: &str) -> ToolResult {
+                Ok(format!("echo:{input}"))
+            }
+        }
+
+        let data_dir = std::env::temp_dir().join(format!("agentos_sdk_{}", Uuid::new_v4()));
+        let system = AgentOSSystem::with_config(RuntimeConfig {
+            data_dir: data_dir.to_string_lossy().into_owned(),
+            ..Default::default()
+        });
+        let handle = AgentBuilder::new("sdk-dispatch-agent")
+            .tool(Box::new(EchoTool))
+            .spawn_on_system(&system)
+            .await
+            .expect("system spawn should succeed");
+
+        let provider = ReplayProvider::new(vec![
+            RecordedResponse {
+                model: "sdk-test-model".into(),
+                content: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "sdk-call-1".into(),
+                    name: "sdk_echo".into(),
+                    arguments: serde_json::json!({"text": "hello"}),
+                }],
+                finish_reason: "tool_calls".into(),
+            },
+            RecordedResponse {
+                model: "sdk-test-model".into(),
+                content: "finished".into(),
+                tool_calls: Vec::new(),
+                finish_reason: "stop".into(),
+            },
+        ])
+        .with_model("sdk-test-model");
+        let step = system
+            .run_agent_once_with_provider(&handle.id, "say hello", Arc::new(provider))
+            .await
+            .expect("the SDK registered tool should execute");
+
+        assert_eq!(step.tool_call_count, 1);
+        assert_eq!(step.tool_invocations.len(), 1);
+        assert!(step.tool_invocations[0].success);
+        assert_eq!(step.tool_invocations[0].output, "echo:{\"text\":\"hello\"}");
+        assert_eq!(step.content, "finished");
+
+        system.shutdown_all().await;
+        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
